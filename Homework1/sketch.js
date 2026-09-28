@@ -111,3 +111,8 @@ function drawHerb(x, y) {
   ellipse(10, 0, 15, 35);
   pop();
 }
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  initScene();
+}
