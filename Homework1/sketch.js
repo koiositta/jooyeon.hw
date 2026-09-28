@@ -7,7 +7,7 @@ function setup() {
   initScene();
 }
 
-function initScence() {
+function initScene() {
   lemons = [];
   ices = [];
   herbs = [];
@@ -114,5 +114,5 @@ function drawHerb(x, y) {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  initScence();
+  initScene();
 }
