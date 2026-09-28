@@ -64,6 +64,7 @@ function draw() {
     let floatY = sin(frameCount * 0.04 + herb.floatOffset) * 4;
     drawHerb(herb.x, herb.y + floatY);
   }
+  checkCollisions();
 }
 
 function drawIce(x, y, size) {
@@ -115,4 +116,51 @@ function drawHerb(x, y) {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   initScene();
+}
+
+function checkCollisions() {
+  let allItems = [];
+
+  for (let item of ices) {
+    let floatY = sin(frameCount * 0.03 + item.floatOffset) * 5;
+    allItems.push({
+      ref: item,
+      renderY: item.y + floatY,
+      radius: item.size / 2,
+    });
+  }
+
+  for (let item of lemons) {
+    let floatY = sin(frameCount * 0.035 + item.floatOffset) * 6;
+    allItems.push({ ref: item, renderY: item.y + floatY, radius: 40 });
+  }
+
+  for (let item of herbs) {
+    let floatY = sin(frameCount * 0.04 + item.floatOffset) * 4;
+    allItems.push({ ref: item, renderY: item.y + floatY, radius: 20 });
+  }
+
+  for (let i = 0; i < allItems.length; i++) {
+    for (let j = i + 1; j < allItems.length; j++) {
+      let a = allItems[i];
+      let b = allItems[j];
+
+      let d = dist(a.ref.x, a.renderY, b.ref.x, b.renderY);
+      let minDist = a.radius + b.radius;
+
+      if (d < minDist && d > 0) {
+        let overlap = minDist - d;
+
+        let dx = (b.ref.x - a.ref.x) / d;
+        let dy = (b.renderY - a.renderY) / d;
+
+        let bounceStrength = 1.5;
+
+        a.ref.x -= dx * overlap * bounceStrength;
+        a.ref.y -= dy * overlap * bounceStrength;
+        b.ref.x += dx * overlap * bounceStrength;
+        b.ref.y += dy * overlap * bounceStrength;
+      }
+    }
+  }
 }
