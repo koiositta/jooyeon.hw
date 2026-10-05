@@ -1,4 +1,15 @@
 // ==========================================
+// 0. HTML 수정 없이 p5.js 자동 복구 로직
+// ==========================================
+(function loadP5Fix() {
+  if (typeof p5 === "undefined") {
+    let script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js";
+    document.head.appendChild(script);
+  }
+})();
+
+// ==========================================
 // 1. 커피 컵 클래스 (CoffeeCup Class)
 // ==========================================
 class CoffeeCup {
@@ -17,12 +28,10 @@ class CoffeeCup {
     this.coffeeLevel = 1.0;
     this.state = "IDLE"; // IDLE, DRINKING, DRAG_THROW, THROWING, SPILLING, FINISHED
 
-    // 던지기 변수
     this.throwVX = 0;
     this.throwVY = 0;
     this.throwDirection = 1;
 
-    // 엎기 변수
     this.spillProgress = 0;
     this.spillTimer = 0;
     this.spillSpeechTriggered = false;
@@ -128,19 +137,16 @@ class CoffeeCup {
 
     rectMode(CENTER);
 
-    // 손잡이
     stroke(100, 75, 70);
     strokeWeight(2);
     fill(255, 250, 248);
     arc(-38, 0, 30, 42, HALF_PI, HALF_PI + PI);
 
-    // 컵 몸통
     stroke(100, 75, 70);
     strokeWeight(2);
     fill(255, 250, 248);
     rect(0, 0, this.width, this.height, 3, 3, 12, 12);
 
-    // 커피 액체
     if (this.coffeeLevel > 0) {
       noStroke();
       fill(130, 85, 75);
@@ -399,13 +405,11 @@ function windowResized() {
 function draw() {
   background(253, 243, 238);
 
-  // 1. 하트 애니메이션
   for (let heart of hearts) {
     heart.update();
     heart.display();
   }
 
-  // 2. 파티클 애니메이션
   for (let i = particles.length - 1; i >= 0; i--) {
     particles[i].update();
     particles[i].display();
@@ -414,16 +418,13 @@ function draw() {
     }
   }
 
-  // 원목 테이블
   fill(240, 212, 202);
   stroke(100, 75, 70);
   strokeWeight(2);
   rect(-5, height / 2 + 85, width + 10, height / 2 + 10);
 
-  // 컵 받침(코스터)
   drawCoaster(width / 2, height / 2 + 80);
 
-  // 속도 측정
   mouseVX = mouseX - prevMouseX;
   mouseVY = mouseY - prevMouseY;
   prevMouseX = mouseX;
@@ -458,7 +459,6 @@ function draw() {
   coffeeCup.display();
   speechBubble.display();
 
-  // 안내문구
   noStroke();
   fill(120, 90, 85);
   textAlign(CENTER, TOP);
@@ -490,7 +490,7 @@ function drawCoaster(cx, cy) {
 }
 
 // ------------------------------------------
-// 인터랙션 이벤트 처리
+// 터치 및 마우스 이벤트
 // ------------------------------------------
 
 function handlePress(px, py) {
