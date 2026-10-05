@@ -1,15 +1,4 @@
 // ==========================================
-// 0. HTML 수정 없이 p5.js 자동 복구 로직
-// ==========================================
-(function loadP5Fix() {
-  if (typeof p5 === "undefined") {
-    let script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js";
-    document.head.appendChild(script);
-  }
-})();
-
-// ==========================================
 // 1. 커피 컵 클래스 (CoffeeCup Class)
 // ==========================================
 class CoffeeCup {
@@ -28,10 +17,12 @@ class CoffeeCup {
     this.coffeeLevel = 1.0;
     this.state = "IDLE"; // IDLE, DRINKING, DRAG_THROW, THROWING, SPILLING, FINISHED
 
+    // 던지기 변수
     this.throwVX = 0;
     this.throwVY = 0;
     this.throwDirection = 1;
 
+    // 엎기 변수
     this.spillProgress = 0;
     this.spillTimer = 0;
     this.spillSpeechTriggered = false;
@@ -60,13 +51,21 @@ class CoffeeCup {
     this.y = my;
   }
 
-  releaseAndThrow(vx, vy, speechBubble) {
+  // 던진 방향 판정 보완 (드래그 이동 거리 + 마우스 속도 혼합)
+  releaseAndThrow(vx, vy, speechBubble, startX, currentX) {
     if (this.state === "DRAG_THROW") {
       this.state = "THROWING";
-      this.throwVX = constrain(vx, -25, 25);
+
+      // 드래그해서 움직인 방향(오른쪽/왼쪽)을 1순위로 체크
+      let dragDir = currentX - startX >= 0 ? 1 : -1;
+
+      // 던지는 속도 설정
+      this.throwVX = vx !== 0 ? constrain(vx, -25, 25) : dragDir * 15;
       this.throwVY = constrain(vy, -18, 5);
 
-      this.throwDirection = this.throwVX >= 0 ? 1 : -1;
+      // 말풍선 위치 방향 결정
+      this.throwDirection =
+        this.throwVX !== 0 ? (this.throwVX >= 0 ? 1 : -1) : dragDir;
 
       const lines = ["Hey!!! What are you doing!!!!!", "Oh My God!!!!"];
       speechBubble.trigger(this.throwDirection, random(lines));
@@ -128,7 +127,7 @@ class CoffeeCup {
       strokeWeight(1.5);
       fill(160, 105, 95);
       let spillSize = this.spillProgress * 85;
-      ellipse(this.x + 40, height / 2 + 95, spillSize * 1.6, spillSize * 0.5);
+      ellipse(this.x + 40, height / 2 + 135, spillSize * 1.6, spillSize * 0.5);
     }
 
     push();
@@ -137,16 +136,19 @@ class CoffeeCup {
 
     rectMode(CENTER);
 
+    // 손잡이
     stroke(100, 75, 70);
     strokeWeight(2);
     fill(255, 250, 248);
     arc(-38, 0, 30, 42, HALF_PI, HALF_PI + PI);
 
+    // 컵 몸통
     stroke(100, 75, 70);
     strokeWeight(2);
     fill(255, 250, 248);
     rect(0, 0, this.width, this.height, 3, 3, 12, 12);
 
+    // 커피 액체
     if (this.coffeeLevel > 0) {
       noStroke();
       fill(130, 85, 75);
@@ -384,7 +386,8 @@ let mouseVY = 0;
 function setup() {
   createCanvas(windowWidth, windowHeight);
 
-  coffeeCup = new CoffeeCup(width / 2, height / 2 + 40);
+  // 테이블이 내려간 만큼 컵 위치도 조정 (height / 2 + 80)
+  coffeeCup = new CoffeeCup(width / 2, height / 2 + 80);
   speechBubble = new SpeechBubble();
 
   for (let i = 0; i < 15; i++) {
@@ -395,7 +398,7 @@ function setup() {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   coffeeCup.initialX = width / 2;
-  coffeeCup.initialY = height / 2 + 40;
+  coffeeCup.initialY = height / 2 + 80;
   if (coffeeCup.state === "IDLE") {
     coffeeCup.x = coffeeCup.initialX;
     coffeeCup.y = coffeeCup.initialY;
@@ -418,13 +421,16 @@ function draw() {
     }
   }
 
+  // 원목 테이블 위치 변경 (height / 2 + 125로 하향 조정)
   fill(240, 212, 202);
   stroke(100, 75, 70);
   strokeWeight(2);
-  rect(-5, height / 2 + 85, width + 10, height / 2 + 10);
+  rect(-5, height / 2 + 125, width + 10, height / 2 + 10);
 
-  drawCoaster(width / 2, height / 2 + 80);
+  // 컵 받침(코스터) 위치도 조정
+  drawCoaster(width / 2, height / 2 + 120);
 
+  // 속도 측정
   mouseVX = mouseX - prevMouseX;
   mouseVY = mouseY - prevMouseY;
   prevMouseX = mouseX;
@@ -535,7 +541,8 @@ function handleRelease(px, py) {
       coffeeCup.drinkStep();
     }
   } else if (coffeeCup.state === "DRAG_THROW") {
-    coffeeCup.releaseAndThrow(mouseVX, mouseVY, speechBubble);
+    // 드래그 시작점과 손을 뗀 포인트를 전달하여 던진 방향 정확히 판단
+    coffeeCup.releaseAndThrow(mouseVX, mouseVY, speechBubble, pressStartX, px);
   }
 
   isCupPressed = false;
