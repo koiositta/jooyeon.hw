@@ -30,10 +30,10 @@ class CoffeeCup {
 
   contains(px, py) {
     return (
-      px > this.x - this.width / 2 - 15 &&
-      px < this.x + this.width / 2 + 15 &&
-      py > this.y - this.height / 2 - 15 &&
-      py < this.y + this.height / 2 + 15
+      px > this.x - this.width / 2 - 20 &&
+      px < this.x + this.width / 2 + 20 &&
+      py > this.y - this.height / 2 - 20 &&
+      py < this.y + this.height / 2 + 20
     );
   }
 
@@ -172,7 +172,7 @@ class CoffeeCup {
 }
 
 // ==========================================
-// 2. 동그란 모양의 타자기 영문 말풍선 클래스
+// 2. 타자기 영문 말풍선 클래스
 // ==========================================
 class SpeechBubble {
   constructor() {
@@ -215,10 +215,10 @@ class SpeechBubble {
     let bubbleX, bubbleY;
 
     if (this.direction === 1) {
-      bubbleX = width - 210;
+      bubbleX = width - 180;
       bubbleY = 110;
     } else if (this.direction === -1) {
-      bubbleX = 210;
+      bubbleX = 180;
       bubbleY = 110;
     } else {
       bubbleX = width / 2;
@@ -229,18 +229,18 @@ class SpeechBubble {
     strokeWeight(1.8);
     fill(255, 245, 245, constrain(this.opacity, 0, 255));
 
-    let bubbleW = max(textWidth(this.fullText) + 60, 220);
-    let bubbleH = 80;
+    let bubbleW = max(textWidth(this.fullText) + 50, 200);
+    let bubbleH = 75;
     ellipse(bubbleX, bubbleY, bubbleW, bubbleH);
 
     let tailStartX, tailTargetX;
 
     if (this.direction === 1) {
-      tailStartX = bubbleX + 50;
-      tailTargetX = bubbleX + 110;
+      tailStartX = bubbleX + 40;
+      tailTargetX = bubbleX + 90;
     } else if (this.direction === -1) {
-      tailStartX = bubbleX - 50;
-      tailTargetX = bubbleX - 110;
+      tailStartX = bubbleX - 40;
+      tailTargetX = bubbleX - 90;
     } else {
       tailStartX = bubbleX;
       tailTargetX = bubbleX;
@@ -249,11 +249,11 @@ class SpeechBubble {
     fill(255, 245, 245, constrain(this.opacity, 0, 255));
     triangle(
       tailStartX - 12,
-      bubbleY + 30,
+      bubbleY + 28,
       tailStartX + 12,
-      bubbleY + 30,
+      bubbleY + 28,
       tailTargetX,
-      bubbleY + (this.direction === 0 ? 80 : 55),
+      bubbleY + (this.direction === 0 ? 80 : 50),
     );
 
     noStroke();
@@ -273,7 +273,7 @@ class SpeechBubble {
 }
 
 // ==========================================
-// 3. 터지는 하트 파티클 클래스 (Heart Particle)
+// 3. 터지는 하트 파티클 클래스
 // ==========================================
 class HeartPopParticle {
   constructor(x, y) {
@@ -290,8 +290,8 @@ class HeartPopParticle {
   update() {
     this.x += this.vx;
     this.y += this.vy;
-    this.vy += 0.08; // 살짝 떨어지는 효과
-    this.alpha -= 6; // 점점 사라짐
+    this.vy += 0.08;
+    this.alpha -= 6;
   }
 
   display() {
@@ -304,7 +304,7 @@ class HeartPopParticle {
 }
 
 // ==========================================
-// 4. 떠다니는 파스텔 하트 클래스 (Floating Heart)
+// 4. 떠다니는 파스텔 하트 클래스
 // ==========================================
 class FloatingHeart {
   constructor() {
@@ -321,10 +321,9 @@ class FloatingHeart {
     this.alpha = random(130, 210);
   }
 
-  // 마우스 클릭 시 터짐 판정
   isClicked(px, py) {
     let d = dist(px, py, this.x, this.y + this.size / 2);
-    return d < this.size * 1.5;
+    return d < this.size * 1.8;
   }
 
   update() {
@@ -359,7 +358,7 @@ class FloatingHeart {
 }
 
 // ==========================================
-// 5. 메인 p5.js 제어 (Main Canvas & Events)
+// 5. 메인 p5.js 제어
 // ==========================================
 let coffeeCup;
 let speechBubble;
@@ -368,7 +367,6 @@ let particles = [];
 let isWaitingRespawn = false;
 let respawnTimer = 0;
 
-// 마우스 인터랙션 제어 변수
 let isCupPressed = false;
 let pressStartX = 0;
 let pressStartY = 0;
@@ -378,8 +376,7 @@ let mouseVX = 0;
 let mouseVY = 0;
 
 function setup() {
-  let canvas = createCanvas(800, 500);
-  canvas.parent("canvas-container");
+  createCanvas(windowWidth, windowHeight);
 
   coffeeCup = new CoffeeCup(width / 2, height / 2 + 40);
   speechBubble = new SpeechBubble();
@@ -389,16 +386,26 @@ function setup() {
   }
 }
 
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  coffeeCup.initialX = width / 2;
+  coffeeCup.initialY = height / 2 + 40;
+  if (coffeeCup.state === "IDLE") {
+    coffeeCup.x = coffeeCup.initialX;
+    coffeeCup.y = coffeeCup.initialY;
+  }
+}
+
 function draw() {
   background(253, 243, 238);
 
-  // 1. 하트 렌더링
+  // 1. 하트 애니메이션
   for (let heart of hearts) {
     heart.update();
     heart.display();
   }
 
-  // 2. 터지는 파티클 애니메이션 렌더링
+  // 2. 파티클 애니메이션
   for (let i = particles.length - 1; i >= 0; i--) {
     particles[i].update();
     particles[i].display();
@@ -407,7 +414,7 @@ function draw() {
     }
   }
 
-  // 테이블
+  // 원목 테이블
   fill(240, 212, 202);
   stroke(100, 75, 70);
   strokeWeight(2);
@@ -416,23 +423,20 @@ function draw() {
   // 컵 받침(코스터)
   drawCoaster(width / 2, height / 2 + 80);
 
-  // 마우스 이동 속도 측정
+  // 속도 측정
   mouseVX = mouseX - prevMouseX;
   mouseVY = mouseY - prevMouseY;
   prevMouseX = mouseX;
   prevMouseY = mouseY;
 
-  // 업데이트
   coffeeCup.update();
   speechBubble.update();
 
-  // 인터랙션 완료 감지 -> 5초 리스폰
   if (coffeeCup.state === "FINISHED" && !isWaitingRespawn) {
     isWaitingRespawn = true;
     respawnTimer = millis();
   }
 
-  // 5초 타자기 카운트다운
   if (isWaitingRespawn) {
     let elapsed = (millis() - respawnTimer) / 1000;
     let remaining = max(0, ceil(5 - elapsed));
@@ -451,18 +455,22 @@ function draw() {
     }
   }
 
-  // 화면 렌더링
   coffeeCup.display();
   speechBubble.display();
 
-  // 테두리
-  stroke(100, 75, 70);
-  strokeWeight(2);
-  noFill();
-  rect(0, 0, width, height);
+  // 안내문구
+  noStroke();
+  fill(120, 90, 85);
+  textAlign(CENTER, TOP);
+  textFont("Courier New");
+  textSize(12);
+  text(
+    "Click Cup: Drink | Drag Cup: Throw | Click+Scroll: Spill | Click Heart: Pop!",
+    width / 2,
+    15,
+  );
 }
 
-// 입체 컵 받침대 (Coaster)
 function drawCoaster(cx, cy) {
   push();
   stroke(100, 75, 70);
@@ -482,48 +490,45 @@ function drawCoaster(cx, cy) {
 }
 
 // ------------------------------------------
-// 마우스 이벤트 처리 (하트 클릭 팝 효과 포함)
+// 인터랙션 이벤트 처리
 // ------------------------------------------
 
-function mousePressed() {
-  // 1. 하트 클릭 검사 (하트 클릭 시 터지는 파티클 생성)
+function handlePress(px, py) {
   for (let heart of hearts) {
-    if (heart.isClicked(mouseX, mouseY)) {
-      // 8~12개 파티클 폭발
+    if (heart.isClicked(px, py)) {
       for (let i = 0; i < 10; i++) {
         particles.push(new HeartPopParticle(heart.x, heart.y));
       }
-      heart.reset(); // 새로운 위치로 하트 재배치
-      return; // 하트를 눌렀을 때는 컵 클릭을 방지
+      heart.reset();
+      return;
     }
   }
 
-  // 2. 커피 컵 클릭 검사
   if (isWaitingRespawn) return;
 
-  if (coffeeCup.contains(mouseX, mouseY)) {
+  if (coffeeCup.contains(px, py)) {
     isCupPressed = true;
-    pressStartX = mouseX;
-    pressStartY = mouseY;
+    pressStartX = px;
+    pressStartY = py;
   }
 }
 
-function mouseDragged() {
+function handleDrag(px, py) {
   if (!isCupPressed || isWaitingRespawn) return;
 
-  let dragDist = dist(mouseX, mouseY, pressStartX, pressStartY);
+  let dragDist = dist(px, py, pressStartX, pressStartY);
 
   if (dragDist > 10 || coffeeCup.state === "DRAG_THROW") {
     if (coffeeCup.state !== "SPILLING") {
-      coffeeCup.startDrag(mouseX, mouseY);
+      coffeeCup.startDrag(px, py);
     }
   }
 }
 
-function mouseReleased() {
+function handleRelease(px, py) {
   if (!isCupPressed) return;
 
-  let moveDist = dist(mouseX, mouseY, pressStartX, pressStartY);
+  let moveDist = dist(px, py, pressStartX, pressStartY);
 
   if (moveDist <= 10 && coffeeCup.state !== "SPILLING") {
     if (coffeeCup.state === "IDLE" || coffeeCup.state === "DRINKING") {
@@ -534,6 +539,35 @@ function mouseReleased() {
   }
 
   isCupPressed = false;
+}
+
+function mousePressed() {
+  handlePress(mouseX, mouseY);
+}
+function mouseDragged() {
+  handleDrag(mouseX, mouseY);
+}
+function mouseReleased() {
+  handleRelease(mouseX, mouseY);
+}
+
+function touchStarted() {
+  if (typeof touches !== "undefined" && touches.length > 0) {
+    handlePress(touches[0].x, touches[0].y);
+  }
+  return false;
+}
+
+function touchMoved() {
+  if (typeof touches !== "undefined" && touches.length > 0) {
+    handleDrag(touches[0].x, touches[0].y);
+  }
+  return false;
+}
+
+function touchEnded() {
+  handleRelease(mouseX, mouseY);
+  return false;
 }
 
 function mouseWheel(event) {
