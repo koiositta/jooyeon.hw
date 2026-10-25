@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>생각의 미궁</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600&family=Cinzel:wght@600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --crimson: #ff2d95;
+        --ink: #f6e9ff;
+        --panel: rgba(16, 4, 22, 0.92);
+        --line: rgba(255, 45, 149, 0.45);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0a0210;
+        color: var(--ink);
+        font-family: "Noto Serif KR", "Nanum Myeongjo", serif;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #stage {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+      }
+      #stage canvas {
+        display: block;
+        touch-action: none;
+      }
+
+      button {
+        font-family: inherit;
+        color: inherit;
+        cursor: pointer;
+      }
+      .glass {
+        background: rgba(14, 4, 20, 0.72);
+        border: 1px solid var(--line);
+        backdrop-filter: blur(6px);
+        box-shadow: 0 0 18px rgba(255, 45, 149, 0.18);
+      }
+
+      /* 상단 좌측: 묶음 서랍 버튼 */
+      #btnDrawer {
+        position: fixed;
+        left: 16px;
+        top: 16px;
+        z-index: 5;
+        padding: 9px 14px;
+        border-radius: 999px;
+        font-size: 14px;
+      }
+      #btnDrawer:hover,
+      #btnNew:hover {
+        box-shadow: 0 0 24px rgba(255, 45, 149, 0.55);
+      }
+
+      /* 하단 중앙: 새 메모 */
+      #btnNew {
+        position: fixed;
+        left: 50%;
+        bottom: 26px;
+        transform: translateX(-50%);
+        z-index: 5;
+        padding: 13px 26px;
+        border-radius: 999px;
+        font-size: 16px;
+        letter-spacing: 0.04em;
+      }
+
+      /* 묶음 서랍 */
+      #drawer {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: min(320px, 86vw);
+        z-index: 8;
+        padding: 70px 14px 20px;
+        transform: translateX(-105%);
+        transition: transform 0.35s ease;
+        border-left: none;
+        border-radius: 0 14px 14px 0;
+        overflow: auto;
+      }
+      #drawer.open {
+        transform: none;
+      }
+      #drawer h2 {
+        margin: 0 0 4px;
+        font-size: 17px;
+        font-weight: 600;
+      }
+      #drawer p {
+        margin: 0 0 14px;
+        font-size: 12px;
+        opacity: 0.65;
+        line-height: 1.6;
+      }
+      #bundleList {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      #bundleList li {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 11px 10px;
+        margin-bottom: 6px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      #bundleList li:hover {
+        border-color: var(--line);
+      }
+      #bundleList li.on {
+        border-color: var(--crimson);
+        background: rgba(255, 45, 149, 0.12);
+      }
+      #bundleList li i {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        flex: none;
+        box-shadow: 0 0 8px currentColor;
+      }
+      #bundleList li span {
+        margin-left: auto;
+        font-size: 12px;
+        opacity: 0.7;
+      }
+      #bundleList li .x {
+        background: none;
+        border: none;
+        opacity: 0.35;
+        font-size: 12px;
+        padding: 2px 4px;
+      }
+      #bundleList li .x:hover {
+        opacity: 1;
+        color: var(--crimson);
+      }
+      #drawerClose {
+        position: absolute;
+        right: 12px;
+        top: 16px;
+        background: none;
+        border: none;
+        font-size: 20px;
+        opacity: 0.7;
+      }
+
+      /* 묶음 집중 바 */
+      #focusbar {
+        position: fixed;
+        left: 50%;
+        bottom: 84px;
+        transform: translateX(-50%);
+        z-index: 5;
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 14px;
+        border-radius: 14px;
+        font-size: 13px;
+        max-width: 94vw;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      #focusbar.show {
+        display: flex;
+      }
+      #focusbar button {
+        background: none;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 5px 10px;
+        font-size: 13px;
+      }
+      #focusbar button:hover {
+        background: rgba(255, 45, 149, 0.2);
+      }
+      #fbName {
+        font-weight: 600;
+      }
+      #fbDot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      /* 모달 공통 */
+      .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(4, 0, 10, 0.74);
+        backdrop-filter: blur(5px);
+        padding: 16px;
+      }
+      .modal.open {
+        display: flex;
+        animation: fade 0.25s ease;
+      }
+      @keyframes fade {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      .sheet {
+        position: relative;
+        width: min(660px, 100%);
+        max-height: 92vh;
+        overflow: auto;
+        padding: 26px 26px 22px;
+        border-radius: 16px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        box-shadow: 0 0 50px rgba(255, 45, 149, 0.25);
+      }
+      .sheet::before {
+        content: "";
+        position: absolute;
+        left: 24px;
+        right: 24px;
+        top: 0;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--crimson),
+          transparent
+        );
+      }
+      .sheet h3 {
+        margin: 0 0 12px;
+        font-size: 16px;
+        font-weight: 600;
+        opacity: 0.9;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+      .btn {
+        padding: 10px 18px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.04);
+        font-size: 14px;
+      }
+      .btn:hover {
+        background: rgba(255, 45, 149, 0.2);
+      }
+      .btn.primary {
+        background: linear-gradient(135deg, #ff2d95, #8a1a6e);
+        border-color: transparent;
+        font-weight: 600;
+      }
+      .btn.danger:hover {
+        background: rgba(200, 20, 90, 0.3);
+      }
+
+      /* 에디터 */
+      #memoText {
+        width: 100%;
+        min-height: 34vh;
+        resize: none;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: var(--ink);
+        font-family: inherit;
+        font-size: 18px;
+        line-height: 34px;
+        caret-color: var(--crimson);
+        padding: 0 2px;
+        background-image: repeating-linear-gradient(
+          transparent,
+          transparent 33px,
+          rgba(255, 255, 255, 0.08) 34px
+        );
+      }
+      #memoText::placeholder {
+        color: rgba(246, 233, 255, 0.32);
+      }
+      #edCount {
+        font-size: 12px;
+        opacity: 0.5;
+        text-align: right;
+        margin-top: 4px;
+      }
+      .label {
+        font-size: 12px;
+        opacity: 0.65;
+        margin: 14px 0 7px;
+      }
+      #chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .chip {
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: none;
+        font-size: 13px;
+      }
+      .chip.on {
+        background: rgba(255, 45, 149, 0.22);
+        border-color: var(--crimson);
+        box-shadow: 0 0 12px rgba(255, 45, 149, 0.4);
+      }
+      #newBundleWrap {
+        display: none;
+        margin-top: 10px;
+      }
+      #newBundleWrap.show {
+        display: block;
+      }
+      #newBundle {
+        width: 100%;
+        padding: 9px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--ink);
+        font-family: inherit;
+        font-size: 14px;
+        outline: none;
+      }
+      .shake {
+        animation: shake 0.35s;
+      }
+      @keyframes shake {
+        25% {
+          transform: translateX(-6px);
+        }
+        75% {
+          transform: translateX(6px);
+        }
+      }
+
+      /* 리더 */
+      #rdMeta {
+        font-size: 12px;
+        opacity: 0.7;
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      #rdMeta i {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      #rdText {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 18px;
+        line-height: 2;
+        margin: 0;
+      }
+
+      /* 묶음 펼쳐 읽기 */
+      #bkTitle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      #bkList {
+        margin-top: 10px;
+        position: relative;
+        padding-left: 22px;
+      }
+      #bkList::before {
+        content: "";
+        position: absolute;
+        left: 5px;
+        top: 6px;
+        bottom: 6px;
+        width: 2px;
+        background: linear-gradient(var(--crimson), rgba(255, 45, 149, 0.2));
+        box-shadow: 0 0 8px var(--crimson);
+      }
+      #bkList article {
+        position: relative;
+        margin-bottom: 22px;
+      }
+      #bkList article::before {
+        content: "";
+        position: absolute;
+        left: -22px;
+        top: 6px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #0a0210;
+        border: 2px solid var(--crimson);
+      }
+      #bkList header {
+        font-size: 12px;
+        opacity: 0.6;
+        margin-bottom: 6px;
+      }
+      #bkList p {
+        margin: 0 0 8px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 16px;
+        line-height: 1.9;
+      }
+      #bkList button {
+        background: none;
+        border: none;
+        font-size: 12px;
+        color: var(--crimson);
+        padding: 0;
+        text-decoration: underline;
+      }
+
+      @media (max-width: 560px) {
+        .sheet {
+          padding: 22px 16px 16px;
+        }
+        #memoText {
+          font-size: 16px;
+          line-height: 30px;
+          background-image: repeating-linear-gradient(
+            transparent,
+            transparent 29px,
+            rgba(255, 255, 255, 0.08) 30px
+          );
+        }
+        #btnNew {
+          bottom: 18px;
+          padding: 12px 20px;
+          font-size: 15px;
+        }
+        #focusbar {
+          bottom: 72px;
+        }
+      }
+
+      /* ===== 테마 버튼: 아리아드네의 실 · 수놓은 종이 ===== */
+      .stitched {
+        position: relative;
+      }
+      .stitched::before {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border: 1.5px dashed rgba(255, 45, 149, 0.85);
+        border-radius: inherit;
+        pointer-events: none;
+        transition: border-color 0.3s;
+      }
+      .stitched:hover::before {
+        border-color: #ffd1ea;
+      }
+
+      #btnDrawer {
+        position: fixed;
+        left: 16px;
+        top: 16px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 9px 18px 9px 12px;
+        border: none;
+        border-radius: 999px;
+        color: var(--ink);
+        font-size: 14px;
+        letter-spacing: 0.1em;
+        background: linear-gradient(135deg, #2a0830, #0a0210);
+        box-shadow: 0 0 18px rgba(255, 45, 149, 0.32);
+        backdrop-filter: none;
+        transition: box-shadow 0.3s;
+      }
+      #btnDrawer .ico {
+        color: #ff2d95;
+        transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      #btnDrawer:hover {
+        box-shadow: 0 0 28px rgba(255, 45, 149, 0.7);
+      }
+      #btnDrawer:hover .ico {
+        transform: rotate(180deg);
+      }
+
+      #dock {
+        position: fixed;
+        left: 50%;
+        bottom: 26px;
+        transform: translateX(-50%);
+        z-index: 5;
+        filter: drop-shadow(0 0 12px rgba(255, 45, 149, 0.55));
+      }
+      #btnNew {
+        position: relative;
+        left: auto;
+        bottom: auto;
+        transform: none;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 46px 14px 18px;
+        border: none;
+        border-radius: 0;
+        color: var(--ink);
+        font-size: 17px;
+        letter-spacing: 0.14em;
+        background: linear-gradient(135deg, #2a0830, #0a0210 70%);
+        backdrop-filter: none;
+        box-shadow: none;
+        text-align: left;
+        clip-path: polygon(
+          0 0,
+          100% 0,
+          calc(100% - 16px) 50%,
+          100% 100%,
+          0 100%
+        );
+        transition: filter 0.3s;
+      }
+      #btnNew::before {
+        right: 26px;
+        border-radius: 2px;
+      }
+      #btnNew small {
+        display: block;
+        margin-top: 3px;
+        font-family: "Cinzel", serif;
+        font-size: 10px;
+        letter-spacing: 0.32em;
+        opacity: 0.6;
+      }
+      #btnNew .spool {
+        width: 34px;
+        height: 34px;
+        flex: none;
+        transition: transform 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      #btnNew:hover {
+        box-shadow: none;
+        filter: brightness(1.25);
+      }
+      #btnNew:hover .spool {
+        transform: rotate(360deg);
+      }
+      #btnNew:active {
+        transform: scale(0.97);
+      }
+      #dock .thread {
+        position: absolute;
+        right: 100%;
+        top: 50%;
+        width: 70px;
+        height: 40px;
+        margin-top: -20px;
+        overflow: visible;
+        pointer-events: none;
+      }
+      #dock .thread path {
+        fill: none;
+        stroke: #ff2d95;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-dasharray: 6 5;
+        animation: flow 1.6s linear infinite;
+      }
+      @keyframes flow {
+        to {
+          stroke-dashoffset: -22;
+        }
+      }
+
+      #focusbar {
+        bottom: 106px;
+        border-radius: 6px;
+        padding: 12px 18px;
+        gap: 6px 10px;
+        background: linear-gradient(
+          135deg,
+          rgba(32, 6, 36, 0.94),
+          rgba(8, 2, 12, 0.95)
+        );
+      }
+      #focusbar::before {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border: 1px dashed rgba(255, 45, 149, 0.5);
+        border-radius: 3px;
+        pointer-events: none;
+      }
+      #focusbar::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: -20px;
+        width: 2px;
+        height: 20px;
+        margin-left: -1px;
+        background: linear-gradient(#ff2d95, rgba(255, 45, 149, 0.15));
+        box-shadow: 0 0 8px #ff2d95;
+      }
+      #focusbar .fb {
+        position: relative;
+        background: none;
+        border: none;
+        border-radius: 0;
+        padding: 6px 10px;
+        font-size: 13px;
+        letter-spacing: 0.05em;
+        color: var(--ink);
+      }
+      #focusbar .fb::after {
+        content: "";
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: 2px;
+        height: 1px;
+        opacity: 0.55;
+        background: repeating-linear-gradient(
+          90deg,
+          #ff2d95 0 4px,
+          transparent 4px 8px
+        );
+        transition: opacity 0.2s;
+      }
+      #focusbar .fb:hover {
+        background: none;
+        text-shadow: 0 0 10px #ff2d95;
+      }
+      #focusbar .fb:hover::after {
+        opacity: 1;
+      }
+
+      .btn {
+        position: relative;
+      }
+      .btn::before {
+        content: "";
+        position: absolute;
+        inset: 3px;
+        border: 1px dashed rgba(255, 45, 149, 0.55);
+        border-radius: 7px;
+        pointer-events: none;
+      }
+      .btn.primary::before {
+        border-color: rgba(255, 255, 255, 0.55);
+      }
+
+      @media (max-width: 560px) {
+        #dock {
+          bottom: 18px;
+        }
+        #dock .thread {
+          display: none;
+        }
+        #btnNew {
+          font-size: 15px;
+          padding: 12px 40px 12px 14px;
+        }
+        #btnNew .spool {
+          width: 28px;
+          height: 28px;
+        }
+        #focusbar {
+          bottom: 92px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+
+    <button id="btnDrawer" class="stitched" aria-label="실타래 열기">
+      <svg
+        class="ico"
+        viewBox="0 0 24 24"
+        width="22"
+        height="22"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path
+          d="M4 9c6-4 10 4 16 0M4 15c6-4 10 4 16 0M9 3.5c-4 6 4 11 0 17M15 3.5c-4 6 4 11 0 17"
+        />
+      </svg>
+      <span>실타래</span>
+    </button>
+
+    <div id="dock">
+      <svg class="thread" viewBox="0 0 70 40" aria-hidden="true">
+        <path d="M2 30 C 12 2, 24 44, 36 20 S 56 8, 68 22" />
+      </svg>
+      <button id="btnNew" class="stitched">
+        <svg class="spool" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="6" y="3" width="20" height="4" rx="2" fill="#f6e9ff" />
+          <rect x="6" y="25" width="20" height="4" rx="2" fill="#f6e9ff" />
+          <rect x="10" y="7" width="12" height="18" fill="#ff2d95" />
+          <path
+            d="M10 10l12 3M10 14l12 3M10 18l12 3M10 22l12 3"
+            stroke="#8a1a6e"
+            stroke-width="1.4"
+          />
+          <path
+            d="M22 16c6 0 4 8 8 8"
+            fill="none"
+            stroke="#ff2d95"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          />
+        </svg>
+        <span>한 올 잇기<small>TIE A THREAD</small></span>
+      </button>
+    </div>
+
+    <!-- 묶음 서랍 -->
+    <aside id="drawer" class="glass">
+      <button id="drawerClose">✕</button>
+      <h2>실타래</h2>
+      <p>같은 실로 묶인 생각들을 따로 따라가 볼 수 있어요.</p>
+      <ul id="bundleList"></ul>
+    </aside>
+
+    <!-- 묶음 집중 바 -->
+    <div id="focusbar" class="glass">
+      <span id="fbDot"></span>
+      <span id="fbName"></span>
+      <button id="fbPrev" class="fb">↑ 실을 거슬러</button>
+      <span id="fbPos"></span>
+      <button id="fbNext" class="fb">다음 매듭 ↓</button>
+      <button id="fbBook" class="fb">실타래 펼치기</button>
+      <button id="fbClear" class="fb">실 놓기</button>
+    </div>
+
+    <!-- 에디터 -->
+    <div class="modal" id="editor">
+      <div class="sheet">
+        <h3 id="edTitle">무엇을 떠올렸나요?</h3>
+        <textarea
+          id="memoText"
+          placeholder="깊은 곳에서 길어 올린 생각을 적어 보세요…"
+          spellcheck="false"
+        ></textarea>
+        <div id="edCount">0자</div>
+        <div class="label">어느 실타래에 묶을까요?</div>
+        <div id="chips"></div>
+        <div id="newBundleWrap">
+          <input id="newBundle" maxlength="24" placeholder="새 묶음의 이름" />
+        </div>
+        <div class="row">
+          <button class="btn" id="edCancel">닫기 (Esc)</button>
+          <button class="btn primary" id="edSave">
+            실로 묶기 (Ctrl+Enter)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 리더 -->
+    <div class="modal" id="reader">
+      <div class="sheet">
+        <div id="rdMeta"></div>
+        <p id="rdText"></p>
+        <div class="row">
+          <button class="btn danger" id="rdDel">실 풀어내기</button>
+          <button class="btn" id="rdEdit">고쳐 쓰기</button>
+          <button class="btn primary" id="rdClose">닫기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 묶음 펼쳐 읽기 -->
+    <div class="modal" id="book">
+      <div class="sheet">
+        <h3 id="bkTitle"></h3>
+        <div id="bkList"></div>
+        <div class="row">
+          <button class="btn primary" id="bkClose">닫기</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+    <script src="sketch.js"></script>
+  </body>
+</html>
