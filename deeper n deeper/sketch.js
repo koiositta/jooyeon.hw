@@ -962,6 +962,17 @@ function classicHand(a, len, wd, ring) {
   pop();
 }
 
+// DEPTH: 생각을 하나 지나칠 때마다 1씩 깊어진다 (실이 닿아 매듭이 지어진 생각만 센다)
+function depthNow() {
+  let d = 0;
+  for (let k = 0; k < state.memos.length; k++) {
+    if (born[state.memos[k].id] === undefined) break;
+    if (stepOf(k) * GAP - H * 0.35 <= scrollY) d++;
+    else break;
+  }
+  return d;
+}
+
 function drawHUD(t) {
   push();
   // 시계 (우상단) — 로마숫자 클래식 시계
@@ -1102,7 +1113,7 @@ function drawHUD(t) {
 
   // 깊이 (좌상단, 버튼 아래)
   textAlign(LEFT, TOP);
-  const depth = Math.max(0, Math.floor(scrollY / GAP));
+  const depth = depthNow();
   fill(255, 220, 235, 190);
   textFont("Cinzel, serif");
   textSize(12);
