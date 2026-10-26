@@ -6,11 +6,11 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
     />
-    <title>기억의 미궁</title>
+    <title>Labyrinth of Memory</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600&family=Cinzel:wght@600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Pinyon+Script&family=Cinzel:wght@500;600&family=Nanum+Myeongjo:wght@400;700&display=swap"
       rel="stylesheet"
     />
     <style>
@@ -30,7 +30,7 @@
         overflow: hidden;
         background: #0a0210;
         color: var(--ink);
-        font-family: "Noto Serif KR", "Nanum Myeongjo", serif;
+        font-family: "Cormorant Garamond", "Nanum Myeongjo", serif;
         -webkit-tap-highlight-color: transparent;
       }
       #stage {
@@ -781,12 +781,92 @@
           display: none;
         }
       }
+
+      /* ===== Typography: classical serif + script ===== */
+      button,
+      input,
+      textarea {
+        font-family: "Cormorant Garamond", "Nanum Myeongjo", serif;
+        font-weight: 600;
+      }
+      #btnDrawer {
+        font-size: 17px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+      #btnNew {
+        font-size: 27px;
+        letter-spacing: 0.01em;
+      }
+      #btnNew span {
+        font-family: "Pinyon Script", "Cormorant Garamond", cursive;
+        font-weight: 400;
+      }
+      #btnNew small {
+        font-family: "Cinzel", serif;
+        font-size: 10px;
+        font-weight: 500;
+      }
+      #drawer h2,
+      #bkTitle,
+      .sheet h3 {
+        font-family: "Pinyon Script", "Cormorant Garamond", cursive;
+        font-weight: 400;
+        font-size: 30px;
+      }
+      #drawer p {
+        font-size: 16px;
+      }
+      #bundleList li {
+        font-size: 18px;
+      }
+      #focusbar {
+        font-size: 16px;
+      }
+      #focusbar .fb {
+        font-size: 17px;
+      }
+      .btn {
+        font-size: 17px;
+        letter-spacing: 0.02em;
+      }
+      .chip {
+        font-size: 16px;
+      }
+      .label {
+        font-size: 15px;
+        letter-spacing: 0.05em;
+      }
+      .tpanel .hint {
+        font-size: 15px;
+      }
+      #edCount {
+        font-size: 14px;
+      }
+      #rdMeta {
+        font-size: 15px;
+      }
+      #bkList header {
+        font-size: 15px;
+      }
+      #bkList p {
+        font-size: 20px;
+      }
+      @media (max-width: 560px) {
+        #btnNew {
+          font-size: 22px;
+        }
+        .btn {
+          font-size: 15px;
+          padding: 9px 12px;
+        }
+      }
     </style>
   </head>
   <body>
     <div id="stage"></div>
 
-    <button id="btnDrawer" class="stitched" aria-label="실타래 열기">
+    <button id="btnDrawer" class="stitched" aria-label="Open threads">
       <svg
         class="ico"
         viewBox="0 0 24 24"
@@ -802,7 +882,7 @@
           d="M4 9c6-4 10 4 16 0M4 15c6-4 10 4 16 0M9 3.5c-4 6 4 11 0 17M15 3.5c-4 6 4 11 0 17"
         />
       </svg>
-      <span>실타래</span>
+      <span>Threads</span>
     </button>
 
     <div id="dock">
@@ -827,15 +907,15 @@
             stroke-linecap="round"
           />
         </svg>
-        <span>한 올 잇기<small>TIE A THREAD</small></span>
+        <span>Tie a Thought<small>ARIADNE'S THREAD</small></span>
       </button>
     </div>
 
     <!-- 묶음 서랍 -->
     <aside id="drawer" class="glass">
       <button id="drawerClose">✕</button>
-      <h2>실타래</h2>
-      <p>같은 실로 묶인 생각들을 따로 따라가 볼 수 있어요.</p>
+      <h2>Threads</h2>
+      <p>Follow the thoughts bound by a single thread.</p>
       <ul id="bundleList"></ul>
     </aside>
 
@@ -843,18 +923,18 @@
     <div id="focusbar" class="glass">
       <span id="fbDot"></span>
       <span id="fbName"></span>
-      <button id="fbPrev" class="fb">↑ 실을 거슬러</button>
+      <button id="fbPrev" class="fb">↑ Back along the thread</button>
       <span id="fbPos"></span>
-      <button id="fbNext" class="fb">다음 매듭 ↓</button>
-      <button id="fbBook" class="fb">실타래 펼치기</button>
-      <button id="fbClear" class="fb">실 놓기</button>
+      <button id="fbNext" class="fb">Next knot ↓</button>
+      <button id="fbBook" class="fb">Unfurl thread</button>
+      <button id="fbClear" class="fb">Let go</button>
     </div>
 
     <!-- 생각 입력: 글자는 캔버스의 '생각 구름'에 떠오르고, 이 패널에서는 묶을 실을 고른다 -->
     <div class="modal" id="editor">
       <textarea
         id="memoText"
-        aria-label="생각을 적는 곳"
+        aria-label="Where thoughts are written"
         spellcheck="false"
         autocomplete="off"
         maxlength="6000"
@@ -862,18 +942,23 @@
       <div class="tpanel" id="edPanel">
         <div class="hint" id="edHint"></div>
         <div id="edExtra">
-          <div class="label">어느 실타래에 묶을까요?</div>
+          <div class="label">Which thread will you bind it to?</div>
           <div id="chips"></div>
           <div id="newBundleWrap">
-            <input id="newBundle" maxlength="24" placeholder="새 묶음의 이름" />
+            <input
+              id="newBundle"
+              maxlength="24"
+              placeholder="Name of the new thread"
+            />
           </div>
         </div>
         <div class="row">
-          <span id="edCount">0자</span>
-          <button class="btn" id="edCancel">접어 두기 (Esc)</button>
-          <button class="btn primary" id="edSave">
-            실로 묶기 (Ctrl+Enter)
+          <span id="edCount">0 chars</span>
+          <button class="btn" id="edCancel">Fold away (Esc)</button>
+          <button class="btn" id="edNext">
+            + Hang up, write another (Alt+Enter)
           </button>
+          <button class="btn primary" id="edSave">Tie it (Ctrl+Enter)</button>
         </div>
       </div>
     </div>
@@ -883,9 +968,9 @@
       <div class="tpanel" id="rdPanel">
         <div id="rdMeta"></div>
         <div class="row">
-          <button class="btn danger" id="rdDel">실 풀어내기</button>
-          <button class="btn" id="rdEdit">고쳐 쓰기</button>
-          <button class="btn primary" id="rdClose">닫기</button>
+          <button class="btn danger" id="rdDel">Unravel</button>
+          <button class="btn" id="rdEdit">Rewrite</button>
+          <button class="btn primary" id="rdClose">Close</button>
         </div>
       </div>
     </div>
@@ -896,7 +981,7 @@
         <h3 id="bkTitle"></h3>
         <div id="bkList"></div>
         <div class="row">
-          <button class="btn primary" id="bkClose">닫기</button>
+          <button class="btn primary" id="bkClose">Close</button>
         </div>
       </div>
     </div>
