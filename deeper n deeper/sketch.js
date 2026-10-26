@@ -1263,10 +1263,29 @@ window.addEventListener("keydown", (e) => {
     submitEditor();
     return;
   }
-  if (edit.open && e.altKey && e.key === "Enter") {
-    e.preventDefault();
-    stackThought();
-    return;
+  // →: 글의 맨 끝에서 오른쪽 방향키를 누르면 지금 생각을 걸어 두고 다음 생각으로 넘어간다
+  if (
+    edit.open &&
+    !edit.id &&
+    e.key === "ArrowRight" &&
+    !e.shiftKey &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    !e.altKey &&
+    !e.isComposing &&
+    e.keyCode !== 229
+  ) {
+    const ta = $("memoText");
+    if (
+      document.activeElement === ta &&
+      ta.value.trim() &&
+      ta.selectionStart === ta.value.length &&
+      ta.selectionEnd === ta.value.length
+    ) {
+      e.preventDefault();
+      stackThought();
+      return;
+    }
   }
   if (typing || uiOpen()) return;
   if (e.key === "ArrowDown") {
@@ -1325,13 +1344,13 @@ function renderChips() {
     });
     box.appendChild(b);
   };
-  mk("No thread", null, null);
+  mk("실타래 없음", null, null);
   state.bundles.forEach((b) => mk(b.name, b.id, b.color));
   const nb = document.createElement("button");
   nb.type = "button";
   nb.className =
     "chip" + ($("newBundleWrap").classList.contains("show") ? " on" : "");
-  nb.textContent = "+ New thread";
+  nb.textContent = "+ 새 실타래";
   nb.addEventListener("click", () => {
     $("newBundleWrap").classList.toggle("show");
     if ($("newBundleWrap").classList.contains("show")) {
@@ -1359,8 +1378,7 @@ function openEditor(id, fx, fy) {
     }
     ta.value = m.text;
     edit.bundle = m.bundle || null;
-    $("edHint").textContent =
-      "Rewrite it, and it will be re-tied to the same knot.";
+    $("edHint").textContent = "고쳐 쓰면 같은 매듭에 다시 묶여요.";
   } else {
     let draft = "";
     try {
@@ -1372,7 +1390,7 @@ function openEditor(id, fx, fy) {
     edit.bundle =
       state.lastBundle && getBundle(state.lastBundle) ? state.lastBundle : null;
     $("edHint").textContent =
-      "Write whatever surfaces. Press Alt+Enter to hang it up and write another.";
+      "떠오르는 대로 적어 보세요. 글 끝에서 → 키를 누르면 걸어 두고 다음 생각을 쓸 수 있어요.";
   }
   prevText = ta.value;
   const len = ta.value.length,
@@ -1497,14 +1515,16 @@ function refreshEditorButtons() {
   const total = (edit.id ? 0 : queue.length) + cur;
   $("edCount").textContent =
     ta.value.length +
-    " chars" +
-    (queue.length && !edit.id ? " · " + queue.length + " hung up" : "");
+    "자" +
+    (queue.length && !edit.id ? " · " + queue.length + "개 걸어 둠" : "");
   if (edit.id) {
-    $("edSave").textContent = "Re-tie (Ctrl+Enter)";
+    $("edSave").textContent = "다시 묶기 (Ctrl+Enter)";
     $("edNext").style.display = "none";
   } else {
     $("edSave").textContent =
-      total > 1 ? "Tie all " + total + " (Ctrl+Enter)" : "Tie it (Ctrl+Enter)";
+      total > 1
+        ? "모두 묶기 " + total + "개 (Ctrl+Enter)"
+        : "실로 묶기 (Ctrl+Enter)";
     $("edNext").style.display = "";
   }
 }
@@ -1598,7 +1618,7 @@ function snapCurrent() {
   };
 }
 
-// Alt+Enter: 지금 쓴 생각을 빨랫줄에 걸어 두고, 새 구름을 연다
+// → 키(또는 버튼): 지금 쓴 생각을 빨랫줄에 걸어 두고, 새 구름을 연다
 function stackThought() {
   if (edit.id || !edit.open || !view.lastG) return;
   const ta = $("memoText"),
@@ -2295,7 +2315,7 @@ function drawThoughtCloud(g, lay, births, o) {
   }
   if (o.empty) {
     fill(46, 14, 58, 95);
-    text("Write what surfaces…", left + 12, top + 0.5 * g.leading);
+    text("생각을 적어 보세요…", left + 12, top + 0.5 * g.leading);
   }
   let out = null;
   if (o.caret) {
