@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
     />
-    <title>생각의 미궁</title>
+    <title>기억의 미궁</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -289,35 +289,6 @@
         background: rgba(200, 20, 90, 0.3);
       }
 
-      /* 에디터 */
-      #memoText {
-        width: 100%;
-        min-height: 34vh;
-        resize: none;
-        border: none;
-        outline: none;
-        background: transparent;
-        color: var(--ink);
-        font-family: inherit;
-        font-size: 18px;
-        line-height: 34px;
-        caret-color: var(--crimson);
-        padding: 0 2px;
-        background-image: repeating-linear-gradient(
-          transparent,
-          transparent 33px,
-          rgba(255, 255, 255, 0.08) 34px
-        );
-      }
-      #memoText::placeholder {
-        color: rgba(246, 233, 255, 0.32);
-      }
-      #edCount {
-        font-size: 12px;
-        opacity: 0.5;
-        text-align: right;
-        margin-top: 4px;
-      }
       .label {
         font-size: 12px;
         opacity: 0.65;
@@ -454,15 +425,6 @@
       @media (max-width: 560px) {
         .sheet {
           padding: 22px 16px 16px;
-        }
-        #memoText {
-          font-size: 16px;
-          line-height: 30px;
-          background-image: repeating-linear-gradient(
-            transparent,
-            transparent 29px,
-            rgba(255, 255, 255, 0.08) 30px
-          );
         }
         #btnNew {
           bottom: 18px;
@@ -705,6 +667,120 @@
           bottom: 92px;
         }
       }
+
+      /* ===== 생각 구름: 입력/읽기 ===== */
+      #editor,
+      #reader {
+        background: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        pointer-events: none;
+        align-items: flex-end;
+        padding: 0;
+      }
+      #memoText {
+        position: fixed;
+        left: 50%;
+        top: 38%;
+        width: 4px;
+        height: 4px;
+        opacity: 0;
+        border: 0;
+        padding: 0;
+        margin: 0;
+        resize: none;
+        overflow: hidden;
+        font-size: 16px;
+        pointer-events: none;
+      }
+      .tpanel {
+        pointer-events: auto;
+        width: min(760px, 100%);
+        padding: 26px 20px calc(16px + env(safe-area-inset-bottom));
+        background: linear-gradient(
+          180deg,
+          rgba(4, 0, 10, 0),
+          rgba(4, 0, 10, 0.9) 34%
+        );
+      }
+      .tpanel .hint {
+        font-size: 12px;
+        opacity: 0.6;
+        text-align: center;
+        margin-bottom: 8px;
+        letter-spacing: 0.05em;
+      }
+      .tpanel .label {
+        text-align: center;
+      }
+      .tpanel .row {
+        margin-top: 12px;
+        align-items: center;
+      }
+      #chips {
+        justify-content: center;
+      }
+      #edCount {
+        margin: 0 auto 0 0;
+        font-size: 12px;
+        opacity: 0.55;
+      }
+      #rdMeta {
+        justify-content: center;
+        margin-bottom: 0;
+      }
+      #newBundleWrap {
+        max-width: 320px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .chip {
+        position: relative;
+        padding: 7px 14px 7px 24px;
+        border: none;
+        border-radius: 3px 12px 12px 3px;
+        font-size: 13px;
+        background: rgba(255, 255, 255, 0.08);
+        clip-path: polygon(10px 0, 100% 0, 100% 100%, 10px 100%, 0 50%);
+        transition: background 0.2s;
+      }
+      .chip::before {
+        content: "";
+        position: absolute;
+        left: 9px;
+        top: 50%;
+        width: 6px;
+        height: 6px;
+        margin-top: -3px;
+        border-radius: 50%;
+        background: var(--c, #ffd1ea);
+        box-shadow: 0 0 6px var(--c, #ffd1ea);
+      }
+      .chip:hover {
+        background: rgba(255, 45, 149, 0.22);
+      }
+      .chip.on {
+        background: rgba(255, 45, 149, 0.42);
+        box-shadow: none;
+        text-shadow: 0 0 8px #ff2d95;
+      }
+      #dock,
+      #btnDrawer,
+      #focusbar {
+        transition: opacity 0.35s;
+      }
+      body.thinking #dock,
+      body.thinking #btnDrawer,
+      body.thinking #focusbar {
+        opacity: 0;
+        pointer-events: none;
+      }
+      @media (max-height: 540px) {
+        #edExtra,
+        .tpanel .hint {
+          display: none;
+        }
+      }
     </style>
   </head>
   <body>
@@ -774,23 +850,27 @@
       <button id="fbClear" class="fb">실 놓기</button>
     </div>
 
-    <!-- 에디터 -->
+    <!-- 생각 입력: 글자는 캔버스의 '생각 구름'에 떠오르고, 이 패널에서는 묶을 실을 고른다 -->
     <div class="modal" id="editor">
-      <div class="sheet">
-        <h3 id="edTitle">무엇을 떠올렸나요?</h3>
-        <textarea
-          id="memoText"
-          placeholder="깊은 곳에서 길어 올린 생각을 적어 보세요…"
-          spellcheck="false"
-        ></textarea>
-        <div id="edCount">0자</div>
-        <div class="label">어느 실타래에 묶을까요?</div>
-        <div id="chips"></div>
-        <div id="newBundleWrap">
-          <input id="newBundle" maxlength="24" placeholder="새 묶음의 이름" />
+      <textarea
+        id="memoText"
+        aria-label="생각을 적는 곳"
+        spellcheck="false"
+        autocomplete="off"
+        maxlength="6000"
+      ></textarea>
+      <div class="tpanel" id="edPanel">
+        <div class="hint" id="edHint"></div>
+        <div id="edExtra">
+          <div class="label">어느 실타래에 묶을까요?</div>
+          <div id="chips"></div>
+          <div id="newBundleWrap">
+            <input id="newBundle" maxlength="24" placeholder="새 묶음의 이름" />
+          </div>
         </div>
         <div class="row">
-          <button class="btn" id="edCancel">닫기 (Esc)</button>
+          <span id="edCount">0자</span>
+          <button class="btn" id="edCancel">접어 두기 (Esc)</button>
           <button class="btn primary" id="edSave">
             실로 묶기 (Ctrl+Enter)
           </button>
@@ -798,11 +878,10 @@
       </div>
     </div>
 
-    <!-- 리더 -->
+    <!-- 읽기: 글은 구름 속에 펼쳐지고, 이 패널에는 정보와 버튼만 -->
     <div class="modal" id="reader">
-      <div class="sheet">
+      <div class="tpanel" id="rdPanel">
         <div id="rdMeta"></div>
-        <p id="rdText"></p>
         <div class="row">
           <button class="btn danger" id="rdDel">실 풀어내기</button>
           <button class="btn" id="rdEdit">고쳐 쓰기</button>

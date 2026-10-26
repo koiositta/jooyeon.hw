@@ -52,6 +52,7 @@ let state = loadState();
 let W, H, SC, R, CX;
 let scrollY = 0,
   scrollTarget = 0;
+let spinOff = 0; // 생각 구름이 떠 있는 동안 계단이 혼자 천천히 도는 양
 let spin = 0; // 나선 전체의 회전각(rad) — 스크롤에 끌려 돌아간다
 const SPIN = 0.0045; // 스크롤 1px당 회전량
 let threadEnd = 0; // 아리아드네의 실이 닿아 있는 계단(소수 가능)
@@ -63,6 +64,39 @@ let hoverHit = null;
 let pressInfo = null;
 let overCanvas = false;
 const edit = { id: null, bundle: null, open: false };
+
+/* 생각 구름(입력/읽기)의 상태 — 글자는 캔버스 속 구름에 떠오른다 */
+const view = {
+  mode: null,
+  kind: "edit",
+  id: null,
+  text: "",
+  births: [],
+  k: 0,
+  th: 0,
+  scroll: 0,
+  scrollT: 0,
+  from: { x: 0, y: 0 },
+  cache: null,
+  lastInput: -1e9,
+  caret: { x: 0, y: 0 },
+  geom: null,
+  px: 0,
+  py: 0,
+  ps: 1,
+  reserve: 190,
+  measT: 0,
+  shake: -1e9,
+  hideCloud: false,
+  col: null,
+  curCol: null,
+  lastG: null,
+  lastLay: null,
+};
+let tying = null; // 묶는 순간, 구름이 작아져 날아가는 연출
+const sparks = [];
+const cwCache = {};
+let prevText = "";
 
 /* ---------- 유틸 ---------- */
 const $ = (id) => document.getElementById(id);
@@ -96,7 +130,7 @@ function fmtDate(ts) {
 }
 function snip(text) {
   const s = text.replace(/\s+/g, " ").trim();
-  return s.length > 52 ? s.slice(0, 52) + "…" : s;
+  return s.length > 34 ? s.slice(0, 34) + "…" : s;
 }
 function easeOutBack(x) {
   const c1 = 1.70158,
@@ -214,6 +248,11 @@ function setup() {
     document.fonts.load("600 14px Cinzel", "XIVI");
   }
   calcLayout();
+  if (document.fonts && document.fonts.ready)
+    document.fonts.ready.then(() => {
+      for (const k in cwCache) delete cwCache[k];
+      view.cache = null;
+    });
   state.memos.forEach((m) => {
     born[m.id] = -1e9;
   }); // 이미 묶여 있던 생각은 즉시 표시
@@ -237,13 +276,15 @@ function draw() {
   drawWorld(t);
   drawVignette();
   drawHUD(t);
+  drawOverlay(t);
   updateHover();
 }
 
 function updateScroll() {
   scrollY += (scrollTarget - scrollY) * 0.14;
   if (Math.abs(scrollTarget - scrollY) < 0.05) scrollY = scrollTarget;
-  spin += (scrollY * SPIN - spin) * 0.08; // 살짝 늦게 따라와서 멈춘 뒤에도 관성으로 돈다
+  if (view.mode) spinOff += 0.0016;
+  spin += (scrollY * SPIN + spinOff - spin) * 0.08; // 살짝 늦게 따라와서 멈춘 뒤에도 관성으로 돈다
 }
 
 function updateThread() {
@@ -279,8 +320,10 @@ function drawBackground(t) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, top.toString());
   g.addColorStop(1, bot.toString());
+  ctx.save();
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
+  ctx.restore();
   drawDecor(0, t);
   drawDecor(1, t);
   drawDecor(2, t);
@@ -418,6 +461,7 @@ function drawMotif(type, x, y, s, col, rot, layer, t) {
 
 function drawVignette() {
   const ctx = drawingContext;
+  ctx.save();
   const m = Math.min(W, H);
   const g = ctx.createRadialGradient(
     W / 2,
@@ -445,6 +489,7 @@ function drawVignette() {
   g2.addColorStop(1, "rgba(255,0,120," + (0.05 + 0.12 * beat).toFixed(3) + ")");
   ctx.fillStyle = g2;
   ctx.fillRect(0, 0, W, H);
+  ctx.restore();
 }
 
 /* ============================================================
@@ -682,13 +727,15 @@ function drawSlot(t) {
   drawingContext.lineDashOffset = -t * 18;
   circle(0, 0, r * 2 * (hov ? 1.12 : 1 + 0.05 * Math.sin(t * 3)));
   drawingContext.setLineDash([]);
-  line(-r * 0.4, 0, r * 0.4, 0);
-  line(0, -r * 0.4, 0, r * 0.4);
+  noStroke();
+  fill(255, 225, 240, hov ? 255 : 215);
+  for (let k = -1; k <= 1; k++)
+    circle(k * r * 0.42, Math.sin(t * 4 + k * 1.2) * 2.5, r * 0.2);
   noStroke();
   fill(255, 225, 235, hov ? 255 : 175);
   textAlign(CENTER, CENTER);
   textSize(11 * SC + 1);
-  text("다음 생각을 묶는다", 0, -r - 12 * SC);
+  text("생각을 띄워 묶는다", 0, -r - 12 * SC);
   pop();
   hitRects.push({ type: "slot", x: ax, y: cy, r: r * 1.3 });
 }
@@ -696,7 +743,7 @@ function drawSlot(t) {
 /* ----- 메모(종이쪽지) ----- */
 const CARD_W = 150,
   CARD_H = 96,
-  CARD_OFF = 22;
+  CARD_OFF = 34;
 
 function inFocus(m) {
   if (focus === null) return true;
@@ -780,42 +827,35 @@ function drawMemo(mi, t) {
 
   if (ap < 0.01) return;
 
-  // 종이쪽지
+  // 생각 풍선 — 실에 매달려 둥실 떠 있는 생각
   push();
   translate(ax, ay);
   rotate(rot);
-  scale(sc);
-  drawingContext.globalAlpha = constrain(ap, 0, 1) * fa * ba;
-  stroke(255, 45, 149, 200);
-  strokeWeight(1.4);
-  line(0, 0, 0, -CARD_OFF);
-  const top = -CARD_OFF - CARD_H;
+  scale(sc * (hov ? 1.05 : 1));
+  const ctx = drawingContext;
+  ctx.globalAlpha = constrain(ap, 0, 1) * fa * ba;
+  const bob = Math.sin(t * 1.3 + mi * 1.9) * 2.2;
+  const edge = b ? b.color : "#ff6fb9";
+  const tails = [
+    [0, -7, 2.6],
+    [3, -16, 4.2],
+    [-2, -26, 5.6],
+  ];
+  for (const q of tails)
+    dotGlow(ctx, q[0], q[1] + bob * 0.4, q[2], "#f8eaf6", edge, hov ? 18 : 8);
+  const bcy = -CARD_OFF - CARD_H / 2 + bob;
+  const pts = cloudPts(0, bcy, 58, 34, 10, 14, t);
+  paintCloud(ctx, pts, 0, bcy, 58, 34, "#f8eaf6", edge, hov ? 26 : 12, 2);
   noStroke();
-  fill(0, 0, 0, 80);
-  rect(-CARD_W / 2 + 4, top + 5, CARD_W, CARD_H, 3);
-  if (hov) {
-    drawingContext.shadowBlur = 26;
-    drawingContext.shadowColor = col;
-  }
-  fill(250, 232, 243);
-  rect(-CARD_W / 2, top, CARD_W, CARD_H, 3);
-  drawingContext.shadowBlur = 0;
-  fill(col);
-  rect(-CARD_W / 2, top, CARD_W, 15, 3, 3, 0, 0);
-  push();
-  translate(0, top);
-  rotate(-0.05);
-  fill(255, 255, 255, 120);
-  rect(-18, -7, 36, 13);
-  pop();
-  fill(30, 15, 45);
+  fill(46, 18, 58);
   textAlign(LEFT, TOP);
-  textSize(9);
-  text(fmtDate(m.ts), -CARD_W / 2 + 7, top + 3);
-  fill(46, 28, 60);
-  textSize(11.5);
-  textLeading(15);
-  text(snip(m.text), -CARD_W / 2 + 9, top + 21, CARD_W - 18, CARD_H - 26);
+  textSize(11);
+  textLeading(14);
+  text(snip(m.text), -46, bcy - 26, 92, 54);
+  if (b) {
+    fill(b.color);
+    heart(46, bcy - 30, 4.5);
+  }
   pop();
 
   if (inF && age > 0.6)
@@ -1088,9 +1128,19 @@ function mousePressed(e) {
 }
 
 function mouseDragged() {
-  if (!pressInfo || uiOpen()) return;
+  if (!pressInfo) return;
   if (Math.abs(mouseX - pressInfo.x) + Math.abs(mouseY - pressInfo.y) > 6)
     pressInfo.moved = true;
+  if (view.mode) {
+    if (view.mode === "read" && pressInfo.moved && view.geom)
+      view.scrollT = constrain(
+        view.scrollT - (mouseY - pmouseY) / view.geom.leading,
+        0,
+        Math.max(0, view.geom.lines - view.geom.vis),
+      );
+    return;
+  }
+  if (uiOpen()) return;
   if (pressInfo.moved)
     scrollTarget = Math.max(0, scrollTarget - (mouseY - pmouseY) * 1.4);
 }
@@ -1099,17 +1149,32 @@ function mouseReleased() {
   if (!pressInfo) return;
   const was = pressInfo;
   pressInfo = null;
+  if (view.mode) {
+    if (!was.moved) handleCloudClick();
+    return;
+  }
   if (was.moved || uiOpen()) return;
   const h = hitTest(mouseX, mouseY);
   if (!h) return;
-  if (h.type === "slot") openEditor(null);
-  else openReader(h.id);
+  if (h.type === "slot") openEditor(null, mouseX, mouseY);
+  else openReader(h.id, mouseX, mouseY);
 }
 
 window.addEventListener(
   "wheel",
   (e) => {
-    if (!e.target || e.target.tagName !== "CANVAS" || uiOpen()) return;
+    if (!e.target || e.target.tagName !== "CANVAS") return;
+    if (view.mode) {
+      e.preventDefault();
+      if (view.mode === "read" && view.geom)
+        view.scrollT = constrain(
+          view.scrollT + Math.sign(e.deltaY),
+          0,
+          Math.max(0, view.geom.lines - view.geom.vis),
+        );
+      return;
+    }
+    if (uiOpen()) return;
     e.preventDefault();
     scrollTarget = Math.max(
       0,
@@ -1161,12 +1226,19 @@ window.addEventListener("keydown", (e) => {
    ============================================================ */
 function closeAll() {
   if (edit.open) closeEditor();
-  $("reader").classList.remove("open");
+  closeReader();
   $("book").classList.remove("open");
   $("drawer").classList.remove("open");
 }
 
-/* ----- 에디터 ----- */
+/* ----- 에디터: 글자가 실에 꿰어 구름으로 떠오른다 ----- */
+function syncBody() {
+  document.body.classList.toggle(
+    "thinking",
+    edit.open || document.getElementById("reader").classList.contains("open"),
+  );
+}
+
 function renderChips() {
   const box = $("chips");
   box.innerHTML = "";
@@ -1175,12 +1247,13 @@ function renderChips() {
     b.type = "button";
     b.className = "chip" + (edit.bundle === id ? " on" : "");
     b.textContent = label;
-    if (color) b.style.borderColor = color;
+    if (color) b.style.setProperty("--c", color);
     b.addEventListener("click", () => {
       edit.bundle = id;
       $("newBundleWrap").classList.remove("show");
       $("newBundle").value = "";
       renderChips();
+      $("memoText").focus();
     });
     box.appendChild(b);
   };
@@ -1202,8 +1275,9 @@ function renderChips() {
   box.appendChild(nb);
 }
 
-function openEditor(id) {
+function openEditor(id, fx, fy) {
   closeAll();
+  const ta = $("memoText");
   edit.id = id;
   edit.open = true;
   $("newBundle").value = "";
@@ -1214,28 +1288,52 @@ function openEditor(id) {
       edit.open = false;
       return;
     }
-    $("edTitle").textContent = "생각을 고쳐 묶는다";
-    $("memoText").value = m.text;
+    ta.value = m.text;
     edit.bundle = m.bundle || null;
-    $("edSave").textContent = "고쳐 묶기 (Ctrl+Enter)";
+    $("edHint").textContent = "고쳐 쓰면 같은 매듭에 다시 묶여요.";
+    $("edSave").textContent = "다시 묶기 (Ctrl+Enter)";
   } else {
-    $("edTitle").textContent = "무엇을 떠올렸나요?";
     let draft = "";
     try {
       draft = localStorage.getItem(DRAFT_KEY) || "";
     } catch (e) {
       /* 무시 */
     }
-    $("memoText").value = draft;
+    ta.value = draft;
     edit.bundle =
       state.lastBundle && getBundle(state.lastBundle) ? state.lastBundle : null;
+    $("edHint").textContent =
+      "떠오르는 대로 적어 보세요. 글자가 실에 꿰어 구름이 돼요.";
     $("edSave").textContent = "실로 묶기 (Ctrl+Enter)";
   }
+  prevText = ta.value;
+  const len = ta.value.length,
+    stepMs = Math.min(14, 900 / Math.max(1, len)),
+    t0 = millis() + 200;
+  view.births = Array.from({ length: len }, (_, i) => t0 + i * stepMs);
+  Object.assign(view, {
+    mode: "edit",
+    kind: "edit",
+    id,
+    text: ta.value,
+    hideCloud: false,
+    th: 0,
+    scroll: 0,
+    scrollT: 0,
+    measT: 0,
+    cache: null,
+    from: {
+      x: fx === undefined ? W / 2 : fx,
+      y: fy === undefined ? H - 70 : fy,
+    },
+  });
+  if (!id)
+    scrollTarget = Math.max(0, stepOf(state.memos.length) * GAP - H * 0.32); // 새 생각은 실 끝, 계단 위에서 떠올린다
   updateCount();
   renderChips();
   $("editor").classList.add("open");
+  syncBody();
   setTimeout(() => {
-    const ta = $("memoText");
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   }, 60);
@@ -1251,20 +1349,57 @@ function closeEditor() {
     }
   }
   edit.open = false;
+  if (view.mode === "edit") view.mode = null;
   $("editor").classList.remove("open");
+  syncBody();
+  $("memoText").blur();
 }
 
 function updateCount() {
   $("edCount").textContent = $("memoText").value.length + "자";
 }
 
+// 글자가 들어올 때마다 그 글자만의 '태어난 시각'을 남겨 떠오르는 연출에 쓴다
+function onMemoInput() {
+  const ta = $("memoText"),
+    nv = ta.value,
+    ov = prevText,
+    now = millis();
+  const m = Math.min(nv.length, ov.length);
+  let p = 0;
+  while (p < m && nv[p] === ov[p]) p++;
+  let q = 0;
+  while (q < m - p && nv[nv.length - 1 - q] === ov[ov.length - 1 - q]) q++;
+  const mid = nv.length - p - q,
+    del = ov.length - p - q;
+  const nb = view.births.slice(0, p);
+  for (let k = 0; k < mid; k++)
+    nb.push(
+      del === mid && mid <= 2 && view.births[p + k] !== undefined
+        ? view.births[p + k]
+        : now,
+    );
+  for (let k = ov.length - q; k < ov.length; k++)
+    nb.push(view.births[k] === undefined ? -1e9 : view.births[k]);
+  view.births = nb;
+  prevText = nv;
+  view.lastInput = now;
+  updateCount();
+  if (!edit.id) {
+    try {
+      localStorage.setItem(DRAFT_KEY, nv);
+    } catch (e) {
+      /* 무시 */
+    }
+  }
+  if (mid > del) spawnSparks(view.caret.x, view.caret.y, Math.min(5, 2 + mid));
+}
+
 function submitEditor() {
-  const text = $("memoText").value.trim();
+  const ta = $("memoText");
+  const text = ta.value.trim();
   if (!text) {
-    const ta = $("memoText");
-    ta.classList.remove("shake");
-    void ta.offsetWidth;
-    ta.classList.add("shake");
+    view.shake = millis();
     return;
   }
   // 새 묶음 만들기
@@ -1279,6 +1414,7 @@ function submitEditor() {
     state.bundles.push(nb);
     bundleId = nb.id;
   }
+  let tie = null;
   if (edit.id) {
     const m = state.memos.find((x) => x.id === edit.id);
     if (m) {
@@ -1295,18 +1431,36 @@ function submitEditor() {
       /* 무시 */
     }
     scrollTarget = Math.max(0, stepOf(state.memos.length - 1) * GAP - H * 0.32); // 실이 닿는 곳으로 내려간다
+    const d = scrollTarget - scrollY;
+    if (Math.abs(d) > H) scrollY = scrollTarget - Math.sign(d) * H * 0.7; // 너무 멀면 가까이서 출발
+    tie = m;
   }
   state.lastBundle = bundleId || null;
   saveState();
+  if (tie) {
+    startTie(tie);
+    ta.value = "";
+    prevText = "";
+    view.births = [];
+  } else spawnSparks(view.px, view.py, 22);
   edit.open = false;
+  view.mode = null;
   $("editor").classList.remove("open");
+  syncBody();
+  ta.blur();
   renderDrawer();
   refreshFocusBar();
 }
 
-/* ----- 리더 ----- */
+/* ----- 리더: 생각이 구름으로 펼쳐지며 글자가 하나씩 떠오른다 ----- */
 let readingId = null;
-function openReader(id) {
+function closeReader() {
+  document.getElementById("reader").classList.remove("open");
+  if (view.mode === "read") view.mode = null;
+  syncBody();
+}
+
+function openReader(id, fx, fy) {
   const m = state.memos.find((x) => x.id === id);
   if (!m) return;
   closeAll();
@@ -1319,8 +1473,29 @@ function openReader(id) {
     (b
       ? `<span>·</span><i style="background:${b.color}"></i><span>${esc(b.name)}</span>`
       : "");
-  $("rdText").textContent = m.text;
+  const len = m.text.length,
+    stepMs = Math.min(18, 1600 / Math.max(1, len)),
+    t0 = millis() + 180;
+  view.births = Array.from({ length: len }, (_, i) => t0 + i * stepMs);
+  Object.assign(view, {
+    mode: "read",
+    kind: "read",
+    id,
+    text: m.text,
+    col: b ? b.color : "#ff6fb9",
+    hideCloud: false,
+    th: 0,
+    scroll: 0,
+    scrollT: 0,
+    measT: 0,
+    cache: null,
+    from: {
+      x: fx === undefined ? W / 2 : fx,
+      y: fy === undefined ? H / 2 : fy,
+    },
+  });
   $("reader").classList.add("open");
+  syncBody();
 }
 
 /* ----- 묶음 서랍 ----- */
@@ -1448,16 +1623,7 @@ function bindUI() {
   $("fbBook").addEventListener("click", openBook);
   $("fbClear").addEventListener("click", () => setFocus(null));
 
-  $("memoText").addEventListener("input", () => {
-    updateCount();
-    if (!edit.id) {
-      try {
-        localStorage.setItem(DRAFT_KEY, $("memoText").value);
-      } catch (e) {
-        /* 무시 */
-      }
-    }
-  });
+  $("memoText").addEventListener("input", onMemoInput);
   $("edSave").addEventListener("click", submitEditor);
   $("edCancel").addEventListener("click", closeEditor);
   $("newBundle").addEventListener("keydown", (e) => {
@@ -1467,12 +1633,10 @@ function bindUI() {
     }
   });
 
-  $("rdClose").addEventListener("click", () =>
-    $("reader").classList.remove("open"),
-  );
+  $("rdClose").addEventListener("click", () => closeReader());
   $("rdEdit").addEventListener("click", () => {
     const id = readingId;
-    $("reader").classList.remove("open");
+    closeReader();
     openEditor(id);
   });
   $("rdDel").addEventListener("click", () => {
@@ -1482,7 +1646,7 @@ function bindUI() {
       state.memos = state.memos.filter((x) => x.id !== readingId);
       delete born[readingId];
       saveState();
-      $("reader").classList.remove("open");
+      closeReader();
       renderDrawer();
       refreshFocusBar();
     }
@@ -1508,4 +1672,563 @@ function bindUI() {
   $("editor").addEventListener("mousedown", (e) => {
     if (e.target === $("editor")) closeEditor();
   });
+}
+
+/* ============================================================
+   생각 구름 — 글자가 실에 꿰어 떠오르는 입력, 구름으로 펼쳐지는 읽기
+   ============================================================ */
+function frac(x) {
+  return x - Math.floor(x);
+}
+
+function cloudBase() {
+  const fs = W < 600 ? 18 : 22,
+    leading = Math.round(fs * 1.85),
+    rr = fs * 1.55;
+  const a = Math.min(W * 0.9, 760) / 2 - rr;
+  return { fs, leading, rr, a, tw: Math.round(a * 1.5) };
+}
+
+function charW(ch, fs) {
+  const key = fs + "|" + ch;
+  let w = cwCache[key];
+  if (w === undefined) {
+    push();
+    textSize(fs);
+    w = textWidth(ch);
+    pop();
+    cwCache[key] = w;
+  }
+  return w;
+}
+
+// 글자 하나하나의 자리를 계산한다 (한글은 글자 단위, 영어는 단어 단위로 줄바꿈)
+function layoutText(str, maxW, fs) {
+  const key = fs + "|" + Math.round(maxW) + "|" + str;
+  if (view.cache && view.cache.key === key) return view.cache;
+  const chars = [];
+  let x = 0,
+    line = 0,
+    lineStart = 0,
+    lastSp = -1;
+  for (let i = 0; i < str.length; i++) {
+    let ch = str[i],
+      len = 1;
+    const c = str.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+      ch = str.substr(i, 2);
+      len = 2;
+    }
+    if (ch === "\n") {
+      chars.push({ ch, i, len, x, w: 0, line, nl: true });
+      line++;
+      x = 0;
+      lineStart = chars.length;
+      lastSp = -1;
+      continue;
+    }
+    const w = charW(ch, fs);
+    if (x + w > maxW && chars.length > lineStart) {
+      if (
+        ch !== " " &&
+        lastSp >= lineStart &&
+        /[A-Za-z0-9]/.test(chars[chars.length - 1].ch)
+      ) {
+        line++;
+        let nx = 0;
+        for (let j = lastSp + 1; j < chars.length; j++) {
+          chars[j].line = line;
+          chars[j].x = nx;
+          nx += chars[j].w;
+        }
+        x = nx;
+        lineStart = lastSp + 1;
+        lastSp = -1;
+      } else {
+        line++;
+        x = 0;
+        lineStart = chars.length;
+        lastSp = -1;
+      }
+    }
+    chars.push({ ch, i, len, x, w, line });
+    x += w;
+    if (ch === " ") lastSp = chars.length - 1;
+    i += len - 1;
+  }
+  const last = chars[chars.length - 1];
+  const lines = last ? (last.nl ? last.line + 1 : last.line) + 1 : 1;
+  view.cache = { key, chars, lines };
+  return view.cache;
+}
+
+function caretPos(lay, idx) {
+  const ch = lay.chars;
+  for (let q = 0; q < ch.length; q++)
+    if (ch[q].i >= idx) return { x: ch[q].x, line: ch[q].line };
+  if (!ch.length) return { x: 0, line: 0 };
+  const l = ch[ch.length - 1];
+  return l.nl ? { x: 0, line: l.line + 1 } : { x: l.x + l.w, line: l.line };
+}
+
+/* ----- 구름 모양 그리기 ----- */
+function cloudPts(cx, cy, a, b, rr, n, t) {
+  const per = Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
+  const base = Math.max(rr, (per / n) * 0.64);
+  const pts = [];
+  for (let k = 0; k < n; k++) {
+    const th = (k / n) * TWO_PI,
+      v = frac(Math.sin(k * 12.9898) * 43758.5453);
+    pts.push({
+      x: cx + Math.cos(th) * a,
+      y: cy + Math.sin(th) * b,
+      r: base * (0.9 + 0.2 * v) * (1 + 0.035 * Math.sin(t * 1.5 + k * 1.7)),
+    });
+  }
+  return pts;
+}
+
+function paintCloud(ctx, pts, cx, cy, a, b, fillCol, outCol, glow, lw) {
+  const path = (grow) => {
+    ctx.beginPath();
+    for (const p of pts) {
+      ctx.moveTo(p.x + p.r + grow, p.y);
+      ctx.arc(p.x, p.y, p.r + grow, 0, TWO_PI);
+    }
+    ctx.moveTo(cx + a + grow, cy);
+    ctx.ellipse(cx, cy, a + grow, b + grow, 0, 0, TWO_PI);
+  };
+  ctx.save();
+  ctx.shadowBlur = glow;
+  ctx.shadowColor = outCol;
+  ctx.fillStyle = outCol;
+  path(lw);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.fillStyle = fillCol;
+  path(0);
+  ctx.fill();
+  ctx.restore();
+}
+
+function dotGlow(ctx, x, y, r, fillCol, glowCol, blur) {
+  ctx.save();
+  ctx.shadowBlur = blur;
+  ctx.shadowColor = glowCol;
+  ctx.fillStyle = glowCol;
+  ctx.beginPath();
+  ctx.arc(x, y, r + 1.4, 0, TWO_PI);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.fillStyle = fillCol;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, TWO_PI);
+  ctx.fill();
+  ctx.restore();
+}
+
+// 구름 한 덩이(중심이 0,0) — 입력/읽기/날아가는 연출이 모두 이 함수를 쓴다
+function drawThoughtCloud(g, lay, births, o) {
+  const ctx = drawingContext,
+    t = o.t,
+    now = millis();
+  const pts = cloudPts(0, 0, g.a, g.b, g.rr, 38, t);
+  ctx.save();
+  ctx.globalAlpha = constrain(o.alpha, 0, 1);
+  if (o.tail) {
+    // 꼬리 방울 — 아래 실타래 쪽으로 이어진다
+    const by = g.b + g.rr;
+    const tl = [
+      [-g.a * 0.1, by + g.rr * 0.5, g.rr * 0.42],
+      [-g.a * 0.07, by + g.rr * 1.3, g.rr * 0.27],
+      [-g.a * 0.04, by + g.rr * 1.9, g.rr * 0.16],
+    ];
+    tl.forEach((q, k) =>
+      dotGlow(
+        ctx,
+        q[0],
+        q[1] + Math.sin(t * 2 + k) * 2,
+        q[2],
+        "#f8eaf6",
+        o.col,
+        10,
+      ),
+    );
+  }
+  paintCloud(ctx, pts, 0, 0, g.a, g.b, "#f8eaf6", o.col, 22, 2.5);
+  ctx.save(); // 구름을 따라 박음질
+  ctx.setLineDash([7, 6]);
+  ctx.lineDashOffset = -t * 6;
+  ctx.strokeStyle = "rgba(255,45,149,0.55)";
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, g.a, g.b, 0, 0, TWO_PI);
+  ctx.stroke();
+  ctx.restore();
+
+  const left = -g.tw / 2,
+    top = -g.th / 2,
+    sc = o.scroll;
+  ctx.beginPath();
+  ctx.rect(left - 10, top - 2, g.tw + 20, g.th + 4);
+  ctx.clip();
+  ctx.save(); // 줄마다 실로 박은 줄선
+  ctx.setLineDash([5, 5]);
+  ctx.strokeStyle = "rgba(255,45,149,0.3)";
+  ctx.lineWidth = 1;
+  for (let L = Math.floor(sc) - 1; L <= sc + g.vis + 1; L++) {
+    const y = top + (L - sc + 0.5) * g.leading + g.leading * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(left + g.tw, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  push();
+  noStroke();
+  textSize(g.fs);
+  textAlign(LEFT, CENTER);
+  const L0 = sc - 1.5,
+    L1 = sc + g.vis + 1.5;
+  if (o.selA !== o.selB) {
+    fill(255, 45, 149, 80);
+    for (const e of lay.chars) {
+      if (
+        !e.nl &&
+        e.i >= o.selA &&
+        e.i < o.selB &&
+        e.line >= L0 &&
+        e.line <= L1
+      )
+        rect(
+          left + e.x,
+          top + (e.line - sc) * g.leading + 3,
+          e.w,
+          g.leading - 6,
+        );
+    }
+  }
+  for (const e of lay.chars) {
+    // 글자는 아래에서 떠올라, 마젠타 잉크가 스며 짙은 자두색으로 가라앉는다
+    if (e.line < L0 || e.line > L1 || e.nl || e.ch === " ") continue;
+    const bt = births[e.i];
+    const age = now - (bt === undefined ? -1e9 : bt);
+    if (age < 0) continue;
+    const kq = Math.min(age / 450, 1),
+      ee = 1 - Math.pow(1 - kq, 3),
+      ink = Math.min(age / 1600, 1);
+    fill(
+      255 + (46 - 255) * ink,
+      45 + (14 - 45) * ink,
+      149 + (58 - 149) * ink,
+      255 * ee,
+    );
+    text(
+      e.ch,
+      left + e.x,
+      top +
+        (e.line - sc + 0.5) * g.leading +
+        (1 - ee) * 16 +
+        Math.sin(t * 1.4 + e.i * 0.55) * 0.8,
+    );
+  }
+  if (o.empty) {
+    fill(46, 14, 58, 95);
+    text("생각을 적어 보세요…", left + 12, top + 0.5 * g.leading);
+  }
+  let out = null;
+  if (o.caret) {
+    // 캐럿: 빛나는 바늘
+    const x = left + o.caret.x,
+      y = top + (o.caret.line - sc + 0.5) * g.leading;
+    const solid = now - view.lastInput < 700;
+    const al = solid ? 1 : 0.3 + 0.7 * (0.5 + 0.5 * Math.sin((now / 1000) * 5));
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = "rgba(255,45,149,0.9)";
+    stroke(255, 45, 149, 255 * al);
+    strokeWeight(2.2);
+    line(x, y - g.fs * 0.62, x, y + g.fs * 0.62);
+    out = { x, y };
+  }
+  pop();
+  ctx.restore();
+  return out;
+}
+
+/* ----- 입력/읽기 화면 ----- */
+function drawOverlay(t) {
+  const target = view.mode ? 1 : 0;
+  view.k += (target - view.k) * 0.2;
+  if (Math.abs(target - view.k) < 0.004) view.k = target;
+  if (view.k > 0.002) drawThinking(t);
+  if (tying) drawTying(t);
+  drawSparks();
+}
+
+function drawThinking(t) {
+  const ctx = drawingContext,
+    now = millis();
+  const ta = $("memoText");
+  if (view.mode === "edit") view.text = ta.value;
+  const base = cloudBase();
+  const lay = layoutText(view.text, base.tw, base.fs);
+
+  if (view.mode && now - view.measT > 300) {
+    const pn = $(view.kind === "read" ? "rdPanel" : "edPanel");
+    view.reserve = (pn ? pn.offsetHeight : 150) + 16;
+    view.measT = now;
+  }
+  const availH = H - view.reserve - 2 * base.rr - 36;
+  const maxLines = Math.max(
+    2,
+    Math.floor((availH / 2 - 6) / 0.78 / base.leading),
+  );
+  const minLines = Math.min(view.kind === "read" ? 2 : 3, maxLines);
+  const vis = constrain(lay.lines, minLines, maxLines);
+  if (view.th < 1) view.th = vis * base.leading;
+  else view.th += (vis * base.leading - view.th) * 0.16;
+  const th = view.th,
+    bb = th * 0.78 + 6;
+  const g = Object.assign({}, base, { th, b: bb, vis, lines: lay.lines });
+
+  let selA = 0,
+    selB = 0,
+    caretIdx = view.text.length;
+  if (view.mode === "edit") {
+    selA = ta.selectionStart;
+    selB = ta.selectionEnd;
+    caretIdx = ta.selectionDirection === "backward" ? selA : selB;
+  }
+  const cp = caretPos(lay, caretIdx);
+  if (view.mode === "edit") {
+    // 캐럿이 늘 보이도록 구름 속 글이 따라 흐른다
+    if (cp.line < view.scrollT) view.scrollT = cp.line;
+    if (cp.line > view.scrollT + vis - 1) view.scrollT = cp.line - vis + 1;
+  }
+  view.scrollT = constrain(view.scrollT, 0, Math.max(0, lay.lines - vis));
+  view.scroll += (view.scrollT - view.scroll) * 0.25;
+
+  const cx = W / 2,
+    cy = Math.max(bb + base.rr + 16, (H - view.reserve) / 2);
+  const kk = constrain(view.k, 0, 1),
+    s = easeOutBack(kk);
+  const dt = now - view.shake;
+  const sh = dt < 380 ? Math.sin(dt * 0.07) * 10 * (1 - dt / 380) : 0;
+  const px = lerp(view.from.x, cx, kk) + sh,
+    py = lerp(view.from.y, cy, kk);
+  Object.assign(view, { geom: g, px, py, ps: s, lastG: g, lastLay: lay });
+
+  // 막: 세상이 어두워지고, 구름 쪽에서 마젠타 빛이 번진다
+  ctx.save();
+  ctx.fillStyle = "rgba(4,0,10," + (0.5 * kk).toFixed(3) + ")";
+  ctx.fillRect(0, 0, W, H);
+  const gl = ctx.createRadialGradient(px, py, 10, px, py, Math.max(W, H) * 0.6);
+  gl.addColorStop(0, "rgba(255,45,149," + (0.2 * kk).toFixed(3) + ")");
+  gl.addColorStop(1, "rgba(255,45,149,0)");
+  ctx.fillStyle = gl;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+  if (view.hideCloud) return;
+
+  let col = "#ff6fb9";
+  if (view.mode === "edit") {
+    const b = getBundle(edit.bundle);
+    if (b) col = b.color;
+  } else if (view.mode === "read") col = view.col || col;
+  else col = view.curCol || col;
+  view.curCol = col;
+
+  // 하늘에서 내려온 아리아드네의 실 — 생각이 이 실에 매달려 있다
+  push();
+  noFill();
+  stroke(255, 45, 149, 255 * kk);
+  strokeWeight(2);
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = "rgba(255,45,149,0.9)";
+  const topY = py - (bb + base.rr) * s + 10;
+  beginShape();
+  for (let y = -10; y < topY; y += 12) {
+    const u = (y + 10) / Math.max(1, topY + 10);
+    vertex(px + Math.sin(y * 0.025 + t * 1.6) * 9 * (1 - u * 0.7), y);
+  }
+  vertex(px, topY);
+  endShape();
+  noStroke();
+  fill(255, 45, 149, 255 * kk);
+  circle(px, topY, 8);
+  pop();
+
+  push();
+  translate(px, py);
+  scale(s);
+  const cl = drawThoughtCloud(g, lay, view.births, {
+    t,
+    alpha: kk,
+    col,
+    tail: true,
+    scroll: view.scroll,
+    selA,
+    selB,
+    caret: view.mode === "edit" ? cp : null,
+    empty: view.mode === "edit" && !view.text,
+  });
+  pop();
+  if (cl) {
+    view.caret.x = px + cl.x * s;
+    view.caret.y = py + cl.y * s;
+  }
+}
+
+// 구름을 눌렀을 때: 그 자리에 캐럿을 놓고, 구름 밖을 누르면 접는다
+function handleCloudClick() {
+  const g = view.geom;
+  if (!g || view.hideCloud) return;
+  const s = easeOutBack(constrain(view.k, 0, 1)) || 1;
+  const lx = (mouseX - view.px) / s,
+    ly = (mouseY - view.py) / s;
+  const inside =
+    Math.pow(lx / (g.a + g.rr + 8), 2) + Math.pow(ly / (g.b + g.rr + 8), 2) <=
+    1;
+  if (!inside) {
+    if (view.mode === "edit") closeEditor();
+    else closeReader();
+    return;
+  }
+  if (view.mode !== "edit" || !view.cache) return;
+  const ln = Math.floor((ly + g.th / 2) / g.leading + view.scroll);
+  const tx = lx + g.tw / 2;
+  let pos = ln < 0 ? 0 : view.text.length;
+  const ent = view.cache.chars.filter((e) => e.line === ln);
+  if (ent.length) {
+    const l = ent[ent.length - 1];
+    pos = l.nl ? l.i : l.i + l.len;
+    for (const e of ent) {
+      if (tx < e.x + e.w / 2) {
+        pos = e.i;
+        break;
+      }
+    }
+  }
+  const ta = $("memoText");
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
+  view.lastInput = millis();
+}
+
+/* ----- 묶는 순간: 구름이 작은 생각 풍선으로 응축되어 실 끝으로 날아간다 ----- */
+function startTie(m) {
+  if (!view.lastG) return;
+  const b = getBundle(m.bundle);
+  tying = {
+    t0: millis(),
+    id: m.id,
+    g: view.lastG,
+    lay: view.lastLay,
+    births: view.births.slice(),
+    sx: view.px,
+    sy: view.py,
+    s0: view.ps || 1,
+    scroll: view.scroll,
+    col: b ? b.color : "#ff6fb9",
+    trail: [],
+    doneAt: 0,
+  };
+  view.hideCloud = true;
+}
+
+function drawTying(t) {
+  const T = tying,
+    now = millis();
+  const mi = state.memos.findIndex((m) => m.id === T.id);
+  if (mi < 0) {
+    tying = null;
+    return;
+  }
+  const an = posAt(stepOf(mi)),
+    kb = an.s * SC;
+  const tx = an.x,
+    ty = an.y - 8 * an.s - (CARD_OFF + CARD_H / 2) * kb;
+  const p = (now - T.t0) / 1100,
+    pe = constrain(p, 0, 1);
+  const e = pe < 0.5 ? 4 * pe * pe * pe : 1 - Math.pow(-2 * pe + 2, 3) / 2;
+  const swoop = Math.sin(e * Math.PI);
+  const x = lerp(T.sx, tx, e) + swoop * 110,
+    y = lerp(T.sy, ty, e) - swoop * 70;
+  const endS = (2 * (58 + 13) * kb) / (2 * (T.g.a + T.g.rr));
+  const sc = lerp(T.s0, endS, e);
+  if (p >= 1 && !T.doneAt && (born[T.id] !== undefined || p > 3.4))
+    T.doneAt = now; // 실이 닿아 매듭이 지어지면 풍선으로 바뀐다
+  const al = T.doneAt ? 1 - (now - T.doneAt) / 320 : 1;
+  if (al <= 0) {
+    tying = null;
+    return;
+  }
+  T.trail.push({ x, y });
+  if (T.trail.length > 22) T.trail.shift();
+  push();
+  noFill();
+  stroke(255, 45, 149, 200 * al);
+  strokeWeight(2);
+  drawingContext.shadowBlur = 10;
+  drawingContext.shadowColor = "rgba(255,45,149,0.9)";
+  beginShape();
+  T.trail.forEach((q) => vertex(q.x, q.y));
+  endShape();
+  pop();
+  push();
+  translate(x, y);
+  scale(sc);
+  drawThoughtCloud(T.g, T.lay, T.births, {
+    t,
+    alpha: al,
+    col: T.col,
+    tail: false,
+    scroll: T.scroll,
+  });
+  pop();
+  if (p < 1 && Math.random() < 0.6) spawnSparks(x, y, 1);
+}
+
+/* ----- 반짝이는 잉크 방울과 하트 ----- */
+function spawnSparks(x, y, n) {
+  for (let k = 0; k < n; k++) {
+    if (sparks.length > 140) sparks.shift();
+    sparks.push({
+      x: x + (Math.random() - 0.5) * 8,
+      y: y + (Math.random() - 0.5) * 8,
+      vx: (Math.random() - 0.5) * 1.8,
+      vy: -0.5 - Math.random() * 1.5,
+      age: 0,
+      max: 700 + Math.random() * 600,
+      s: 2 + Math.random() * 3,
+      h: Math.random() < 0.4,
+    });
+  }
+}
+
+function drawSparks() {
+  if (!sparks.length) return;
+  const dt = Math.min(deltaTime, 50) / 16.7;
+  push();
+  noStroke();
+  for (let q = sparks.length - 1; q >= 0; q--) {
+    const sp = sparks[q];
+    sp.age += deltaTime;
+    sp.x += sp.vx * dt;
+    sp.y += sp.vy * dt;
+    sp.vx *= 0.985;
+    sp.vy *= 0.985;
+    const u = sp.age / sp.max;
+    if (u >= 1) {
+      sparks.splice(q, 1);
+      continue;
+    }
+    fill(255, 95 + 100 * (1 - u), 190, 255 * (1 - u));
+    if (sp.h) heart(sp.x, sp.y, sp.s * 1.2);
+    else circle(sp.x, sp.y, sp.s);
+  }
+  pop();
 }
