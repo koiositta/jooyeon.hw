@@ -244,6 +244,7 @@ function scrollToMemo(mi) {
 function setup() {
   const c = createCanvas(windowWidth, windowHeight);
   c.parent("stage");
+  bindTouch(c.elt);
   pixelDensity(Math.min(2, window.devicePixelRatio || 1));
   textFont('"Cormorant Garamond", "Nanum Myeongjo", serif');
   if (typeof textWrap === "function") textWrap(CHAR);
@@ -1194,6 +1195,7 @@ function updateHover() {
 }
 
 function mousePressed(e) {
+  if (millis() - lastTouchAt < 700) return; // 터치가 흉내 낸 마우스 이벤트는 무시 (터치는 아래에서 직접 처리)
   if (!e || !e.target || e.target.tagName !== "CANVAS") return;
   pressInfo = { x: mouseX, y: mouseY, moved: false };
 }
@@ -2638,4 +2640,93 @@ function drawSparks() {
     else circle(sp.x, sp.y, sp.s);
   }
   pop();
+}
+
+/* ============================================================
+   터치 — 휴대폰/아이패드에서 손가락으로 끌어 내려가기
+   (p5가 터치를 마우스로 흉내 내는 방식은 기기마다 달라서, 터치를 직접 받는다)
+   ============================================================ */
+let touchInfo = null,
+  lastTouchAt = -1e9;
+
+function handleTap() {
+  if (view.mode) {
+    handleCloudClick();
+    return;
+  }
+  if (uiOpen()) return;
+  const h = hitTest(mouseX, mouseY);
+  if (!h) return;
+  if (h.type === "slot") openEditor(null, mouseX, mouseY);
+  else openReader(h.id, mouseX, mouseY);
+}
+
+function bindTouch(cv) {
+  if (!cv || !cv.addEventListener) return;
+  const pos = (t) => {
+    const r = cv.getBoundingClientRect
+      ? cv.getBoundingClientRect()
+      : { left: 0, top: 0 };
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  };
+  cv.addEventListener(
+    "touchstart",
+    (e) => {
+      lastTouchAt = millis();
+      if (e.touches.length !== 1) {
+        touchInfo = null;
+        return;
+      }
+      const p = pos(e.touches[0]);
+      touchInfo = { x: p.x, y: p.y, ly: p.y, moved: false, vy: 0 };
+      e.preventDefault(); // 페이지 스크롤·확대·가짜 마우스 이벤트를 막는다
+    },
+    { passive: false },
+  );
+  cv.addEventListener(
+    "touchmove",
+    (e) => {
+      lastTouchAt = millis();
+      if (!touchInfo || e.touches.length !== 1) return;
+      e.preventDefault();
+      const p = pos(e.touches[0]),
+        dy = p.y - touchInfo.ly;
+      touchInfo.ly = p.y;
+      if (Math.abs(p.x - touchInfo.x) + Math.abs(p.y - touchInfo.y) > 8)
+        touchInfo.moved = true;
+      if (!touchInfo.moved) return;
+      touchInfo.vy = dy;
+      if (view.mode) {
+        // 생각 구름 속 긴 글은 손가락으로 넘긴다
+        if (view.mode === "read" && view.geom)
+          view.scrollT = constrain(
+            view.scrollT - dy / view.geom.leading,
+            0,
+            Math.max(0, view.geom.lines - view.geom.vis),
+          );
+        return;
+      }
+      if (uiOpen()) return;
+      scrollTarget = Math.max(0, scrollTarget - dy * 1.4); // 손가락을 위로 밀면 아래로 내려간다
+    },
+    { passive: false },
+  );
+  const end = (e) => {
+    lastTouchAt = millis();
+    const T = touchInfo;
+    touchInfo = null;
+    if (!T || e.type === "touchcancel") return;
+    if (e.cancelable) e.preventDefault();
+    if (T.moved) {
+      // 튕기듯 밀면 관성으로 더 내려간다
+      if (!view.mode && !uiOpen() && Math.abs(T.vy) > 3)
+        scrollTarget = Math.max(0, scrollTarget - T.vy * 1.4 * 9);
+      return;
+    }
+    mouseX = T.x;
+    mouseY = T.y; // 살짝 눌렀다 뗀 것(탭)은 클릭과 같게 처리
+    handleTap();
+  };
+  cv.addEventListener("touchend", end, { passive: false });
+  cv.addEventListener("touchcancel", end, { passive: false });
 }
