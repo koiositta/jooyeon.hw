@@ -1,6 +1,6 @@
 /* =========================================================
    Cute♡Collect  —  p5.js + ml5.js (handPose)
-   모바일 전용 웹앱
+   모바일 전용 웹앱 · Firebase(Firestore)로 친구들과 공유
 
    · 디자인 기준 크기: 1080 x 1920 (일러스트 아트보드와 똑같이)
    · 모든 위치(L)는 이 크기 기준 좌표예요.
@@ -45,7 +45,6 @@ const ASSETS = {
   // 공통 버튼
   backBtn: null,
   saveBtn: null,
-  shareBtn: null,
   deleteBtn: null,
   scoreKnob: null, // 점수 바 손잡이 (하트)
   scoreBadge: null, // 컬렉션 썸네일 위 점수 배경
@@ -54,8 +53,13 @@ const ASSETS = {
   listBg: null, // 컬렉션 배경 1080x1920
   listTitleMy: null,
   listTitleBest: null,
-  listTitleShare: null,
   emptyHeart: null, // 컬렉션이 비었을 때
+
+  // share (나랑 친구들 프로필)
+  peopleTitle: null,
+  personCard: null, // 프로필 카드 배경 (940x220)
+  avatarFrame: null, // 프로필 사진 테두리
+  editBtn: null, // 내 닉네임 바꾸기
 };
 
 /* ---------- 2. 레이아웃 (1080x1920 기준) ---------- */
@@ -90,7 +94,12 @@ const L = {
     gap: 40,
     cols: 2,
     thumbH: 600,
-    scoreH: 0,
+  },
+  people: {
+    top: 300,
+    x0: 70,
+    cardH: 220,
+    gap: 30,
   },
 };
 
@@ -102,9 +111,8 @@ const LINE = {
   icon: 0.055, // 아이콘 선 (버튼 지름 대비)
 };
 const HOLD_MS = 900; // 손하트를 이만큼 유지하면 촬영
-const PHOTO_W = 720; // 저장 사진 크기 (9:16)
-const PHOTO_H = 1280;
-const STORE_KEY = "cuteCollect.v2";
+const PHOTO_W = 576; // 저장 사진 크기 (9:16, Firestore 1MB 제한 안으로)
+const PHOTO_H = 1024;
 const DEFAULT_SCORE = 50;
 
 // 카메라가 안 켜질 때 보여줄 짧은 안내 [큰 글씨, 작은 글씨]
@@ -137,8 +145,19 @@ let s = 1,
   oy = 0; // 화면 배율 / 여백
 let scene = "main";
 
-let items = []; // { id, img(dataURL), score, t }
-let thumbs = {}; // id → p5.Image
+// 나 (이 폰) — 처음 들어올 때 자동으로 아이디가 생겨요
+const ME = {
+  uid:
+    localStorage.getItem("cc.uid") ||
+    "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+  name: localStorage.getItem("cc.name") || "",
+};
+localStorage.setItem("cc.uid", ME.uid);
+
+let thumbs = {}; // 사진 id → p5.Image
+let avatars = {}; // 프로필 사진
+let myLatest = null,
+  myLatestT = 0; // 카메라 화면 왼쪽 버튼에 보일 내 최근 사진
 
 let videoEl = null;
 let facing = "environment"; // 'environment' 후면, 'user' 전면
@@ -163,6 +182,8 @@ let handPose = null,
   modelReady = false,
   detecting = false;
 let hands = [];
+const DEBUG = /[?&]debug/.test(location.search);
+let debugInfo = null;
 let holdMs = 0,
   heartPt = null;
 
@@ -172,8 +193,13 @@ let fading = []; // 하트로 인식 안 된 선 (사라지는 중)
 let rating = DEFAULT_SCORE; // 1~100
 let sliding = false; // 점수 바 드래그 중
 
-let listMode = "my"; // 'my' | 'best' | 'share'
-let listScroll = 0;
+let listMode = "my"; // 'my' | 'best' | 'user'
+let listUser = null; // 'user'일 때 그 친구
+let listItems = null; // null이면 불러오는 중
+let people = null; // share 화면 프로필 목록
+let scrollY = 0;
+let loadToken = 0;
+let uploading = false;
 let detailItem = null;
 let delArmed = false;
 
@@ -214,7 +240,12 @@ function setup() {
   pixelDensity(Math.min(2, displayDensity()));
   const cnv = createCanvas(windowWidth, windowHeight);
   fit();
-  loadItems();
+  DB.init();
+  DB.photosByUser(ME.uid)
+    .then((arr) => {
+      if (arr[0]) loadThumb(arr[0]);
+    })
+    .catch(() => {});
 
   const el = cnv.elt;
   el.addEventListener("pointerdown", onDown);
@@ -269,13 +300,22 @@ function draw() {
   else if (scene === "review") drawReview();
   else if (scene === "list") drawList();
   else if (scene === "detail") drawDetail();
+  else if (scene === "people") drawPeople();
 
+  if (uploading) {
+    noStroke();
+    fill(249, 211, 236, 170);
+    rect(-ox / s, -oy / s, width / s, height / s);
+    loadingDots(W / 2, H / 2);
+  }
   drawToast();
   pop();
 
   if (fadeIn > 0) {
     noStroke();
-    const fc = color(scene === "main" || scene === "list" ? C.bg : C.ink);
+    const fc = color(
+      scene === "main" || scene === "list" || scene === "people" ? C.bg : C.ink,
+    );
     fc.setAlpha(fadeIn);
     fill(fc);
     rect(0, 0, width, height);
@@ -302,12 +342,6 @@ function goto(next) {
   heartPt = null;
   delArmed = false;
   if (next === "camera") startCamera();
-}
-
-function openList(mode) {
-  listMode = mode;
-  listScroll = 0;
-  goto("list");
 }
 
 /* =========================================================
@@ -359,7 +393,7 @@ function mainButtons() {
   return [
     { r: m.collect, fn: () => goto("camera") },
     { r: m.my, fn: () => openList("my") },
-    { r: m.share, fn: () => openList("share") },
+    { r: m.share, fn: () => openPeople() },
     { r: m.best, fn: () => openList("best") },
   ];
 }
@@ -399,6 +433,8 @@ function drawCamera() {
   drawAsset("cameraLogo", L.top.logo, (r) => logoText(r, C.white));
   drawAsset("crosshair", L.camera.cross, crossPlaceholder);
   drawIndicator(L.camera.indicator, holdMs / HOLD_MS);
+
+  if (DEBUG) drawDebug();
 
   // 화면에 그리는 하트 선
   drawStrokes(
@@ -520,6 +556,9 @@ function startCamera() {
 function markCamReady() {
   if (camReady || !videoEl) return;
   if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+    // ml5가 영상 크기를 읽을 수 있게 실제 크기를 적어줌 (안 하면 손을 못 찾음)
+    videoEl.width = videoEl.videoWidth;
+    videoEl.height = videoEl.videoHeight;
     camReady = true;
     tryDetect();
   }
@@ -638,29 +677,70 @@ function updateHeartGesture() {
   }
 }
 
-// 엄지 끝과 검지 끝이 맞닿고, 나머지 세 손가락은 접혀 있으면 손하트
+// 손하트: 엄지 끝이 검지(끝~둘째 마디) 근처에 겹쳐 있고,
+//        중지·약지·새끼는 접혀 있으면 손하트로 봐요.
+// 잘 안 되면 주소 뒤에 ?debug 를 붙여서 숫자를 보며 HEART 값을 조절하세요.
+const HEART = {
+  touch: 0.55, // 엄지 끝 ~ 검지 거리 (손바닥 길이 대비, 클수록 느슨)
+  curl: 1.45, // 접힌 손가락 판정 (클수록 느슨)
+};
+
 function fingerHeart(h) {
   const k = h.keypoints;
   if (!k || k.length < 21) return null;
   const d = (a, b) => dist(k[a].x, k[a].y, k[b].x, k[b].y);
 
   const palm = d(0, 9); // 손목 ~ 중지 뿌리
-  if (palm < 20) return null;
+  if (palm < 15) return null;
 
-  const tipsTouch = d(4, 8) < palm * 0.45; // 엄지·검지 끝 맞닿음
-  const curled = [
+  const touch = Math.min(d(4, 8), d(4, 7), d(4, 6)) / palm;
+  const curls = [
     [12, 9],
     [16, 13],
     [20, 17],
-  ] // 중지·약지·새끼 접힘
-    .every(([tip, mcp]) => d(tip, 0) < d(mcp, 0) * 1.3);
-  const lifted = d(8, 0) > palm * 0.9; // 검지가 손 밖으로 나와 있음
-  const apart = d(8, 12) > palm * 0.3; // 주먹과 구분
+  ].map(([tip, mcp]) => d(tip, 0) / d(mcp, 0));
+  const curled = curls.filter((c) => c < HEART.curl).length >= 2; // 셋 중 둘만 접혀도 OK
 
-  if (tipsTouch && curled && lifted && apart) {
-    return { x: (k[4].x + k[8].x) / 2, y: (k[4].y + k[8].y) / 2 };
+  debugInfo = {
+    touch: touch.toFixed(2),
+    curls: curls.map((c) => c.toFixed(2)).join(" / "),
+  };
+
+  if (touch < HEART.touch && curled) {
+    return { x: (k[4].x + k[7].x) / 2, y: (k[4].y + k[7].y) / 2 };
   }
   return null;
+}
+
+// ?debug 일 때: 손 관절 점과 판정 숫자 보기
+function drawDebug() {
+  noStroke();
+  for (const h of hands || []) {
+    (h.keypoints || []).forEach((p, i) => {
+      const q = mapKp(p);
+      fill(
+        [4, 6, 7, 8].includes(i) ? C.pink : i === 0 || i === 9 ? C.mint : 255,
+      );
+      circle(q.x, q.y, 18);
+    });
+  }
+  fill(0, 150);
+  rect(80, 260, 920, 230, 30);
+  fill(255);
+  textFont("monospace");
+  textStyle(NORMAL);
+  textAlign(LEFT, TOP);
+  textSize(34);
+  text(
+    `model ${modelReady ? "ready" : "loading"} · hands ${hands ? hands.length : 0}`,
+    110,
+    285,
+  );
+  if (debugInfo) {
+    text(`touch ${debugInfo.touch}  (< ${HEART.touch})`, 110, 340);
+    text(`curl  ${debugInfo.curls}  (< ${HEART.curl})`, 110, 395);
+  }
+  if (!hands || !hands.length) debugInfo = null;
 }
 
 /* ---------- 화면에 그린 하트 인식 ----------
@@ -792,97 +872,157 @@ function smoothPath(pts, g, k = 1, offX = 0, offY = 0) {
 }
 
 function saveCurrent() {
-  if (!photo) return;
-  const data = photo.elt.toDataURL("image/jpeg", 0.72);
-
-  const item = { id: Date.now(), img: data, score: rating, t: Date.now() };
-  items.unshift(item);
-  if (!persist()) {
-    items.shift();
-    toast("full ✕");
+  if (!photo || uploading) return;
+  if (!ME.name) {
+    askName(() => saveCurrent());
     return;
   }
-  loadImage(data, (im) => {
-    thumbs[item.id] = im;
-  });
-  toast("collected ♡");
-  openList("my");
+
+  const data = photo.elt.toDataURL("image/jpeg", 0.72);
+  const doc = {
+    uid: ME.uid,
+    name: ME.name,
+    img: data,
+    score: rating,
+    t: Date.now(),
+  };
+
+  uploading = true;
+  DB.addPhoto(doc)
+    .then((id) => {
+      loadImage(data, (im) => {
+        thumbs[id] = im;
+        myLatest = im;
+      });
+      return refreshMyProfile();
+    })
+    .then(() => {
+      uploading = false;
+      toast("collected ♡");
+      openList("my");
+    })
+    .catch((err) => {
+      console.warn("upload error:", err);
+      uploading = false;
+      toast("upload ✕");
+    });
 }
 
 /* =========================================================
-   컬렉션 (my / best / share)
+   컬렉션 (my / best / user)
+   my   : 내가 모은 사진 (최신순)
+   best : 모두의 사진 점수 랭킹
+   user : 친구 한 명의 사진
    ========================================================= */
-function sortedItems() {
-  const arr = items.slice();
-  if (listMode === "best") arr.sort((a, b) => b.score - a.score || b.t - a.t);
-  else arr.sort((a, b) => b.t - a.t);
-  return arr;
+function openList(mode, user) {
+  listMode = mode;
+  listUser = user || null;
+  listItems = null;
+  scrollY = 0;
+  goto("list");
+
+  const token = ++loadToken;
+  const req =
+    mode === "best"
+      ? DB.bestPhotos(30)
+      : DB.photosByUser(mode === "my" ? ME.uid : user.uid);
+  req
+    .then((arr) => {
+      if (token !== loadToken) return;
+      listItems = arr;
+      arr.forEach(loadThumb);
+    })
+    .catch((err) => {
+      console.warn(err);
+      if (token === loadToken) {
+        listItems = [];
+        toast("load ✕");
+      }
+    });
+}
+
+function loadThumb(it) {
+  if (thumbs[it.id] || thumbs[it.id] === false) return;
+  thumbs[it.id] = false; // 불러오는 중
+  loadImage(it.img, (im) => {
+    thumbs[it.id] = im;
+    if (it.uid === ME.uid && (!myLatestT || it.t >= myLatestT)) {
+      myLatest = im;
+      myLatestT = it.t;
+    }
+  });
 }
 
 function cellRect(i) {
   const g = L.list;
   const cw = (W - g.x0 * 2 - g.gap * (g.cols - 1)) / g.cols;
-  const ch = g.thumbH + g.scoreH;
   const col = i % g.cols,
     row = Math.floor(i / g.cols);
   return {
     x: g.x0 + col * (cw + g.gap),
-    y: g.top + row * (ch + g.gap) - listScroll,
+    y: g.top + row * (g.thumbH + g.gap) - scrollY,
     w: cw,
-    h: ch,
     thumbH: g.thumbH,
   };
 }
 
-function maxScroll() {
+function listMaxScroll() {
   const g = L.list;
-  const rows = Math.ceil(items.length / g.cols);
-  const total = rows * (g.thumbH + g.scoreH + g.gap);
-  return Math.max(0, total - (H - g.top - 60));
+  const rows = Math.ceil((listItems ? listItems.length : 0) / g.cols);
+  return Math.max(0, rows * (g.thumbH + g.gap) - (H - g.top - 60));
 }
+
+const EMPTY_R = { x: 290, y: 760, w: 500, h: 450 };
 
 function drawList() {
   drawAsset("listBg", { x: 0, y: 0, w: W, h: H }, () => {});
-
-  const arr = sortedItems();
   const g = L.list;
 
-  if (arr.length === 0) {
-    const r = { x: 290, y: 760, w: 500, h: 450 };
-    button("emptyHeart", r, (rr) => {
+  if (listItems === null) {
+    loadingDots(W / 2, H / 2);
+  } else if (listItems.length === 0) {
+    if (listMode === "my") {
+      button("emptyHeart", EMPTY_R, (rr) => {
+        noFill();
+        stroke(C.pink);
+        strokeWeight(LINE.ui * 2);
+        heartR(rr);
+        noStroke();
+        fill(C.pink);
+        rectMode(CENTER);
+        rect(rr.x + rr.w / 2, rr.y + rr.h * 0.46, 90, 10, 5);
+        rect(rr.x + rr.w / 2, rr.y + rr.h * 0.46, 10, 90, 5);
+        rectMode(CORNER);
+      });
+    } else {
       noFill();
       stroke(C.pink);
       strokeWeight(LINE.ui * 2);
-      heartR(rr);
-      noStroke();
-      fill(C.pink);
-      rectMode(CENTER);
-      rect(rr.x + rr.w / 2, rr.y + rr.h * 0.46, 90, 10, 5);
-      rect(rr.x + rr.w / 2, rr.y + rr.h * 0.46, 10, 90, 5);
-      rectMode(CORNER);
-    });
+      heartR(EMPTY_R);
+    }
   } else {
-    // 그리드 영역만 보이게 자르기
     drawingContext.save();
     drawingContext.beginPath();
     drawingContext.rect(0, g.top - 20, W, H - g.top + 20);
     drawingContext.clip();
 
-    arr.forEach((it, i) => {
+    listItems.forEach((it, i) => {
       const c = cellRect(i);
-      if (c.y + c.h < g.top - 40 || c.y > H) return;
+      if (c.y + c.thumbH < g.top - 40 || c.y > H) return;
       const th = thumbs[it.id];
+
       softShadow(30, 0.18);
       noStroke();
       fill(C.white);
       rect(c.x - 6, c.y - 6, c.w + 12, c.thumbH + 12, 30);
       noShadow();
-      if (th) {
-        imageCover(th, c.x, c.y, c.w, c.thumbH, 22);
-      } else {
+      if (th) imageCover(th, c.x, c.y, c.w, c.thumbH, 24);
+      else {
         fill(C.mint);
-        rect(c.x, c.y, c.w, c.thumbH, 22);
+        rect(c.x, c.y, c.w, c.thumbH, 24);
       }
+
+      // 랭킹 순위
       if (listMode === "best" && i < 3) {
         fill(C.pink);
         circle(c.x + 56, c.y + 56, 76);
@@ -892,64 +1032,255 @@ function drawList() {
         textSize(44);
         text(i + 1, c.x + 56, c.y + 53);
       }
-      drawAsset(
-        "scoreBadge",
-        { x: c.x + c.w - 170, y: c.y + c.thumbH - 110, w: 150, h: 90 },
-        (r) => {
-          noStroke();
-          fill(C.pink);
-          rect(r.x, r.y, r.w, r.h, r.h / 2);
-        },
-      );
-      label(
-        { x: c.x + c.w - 170, y: c.y + c.thumbH - 110, w: 150, h: 90 },
-        it.score,
-        C.white,
-        54,
-        "Oswald",
-        0.46,
-      );
-    });
+      // 랭킹에서는 누가 찍었는지
+      if (listMode === "best")
+        namePill(it.name, c.x + 20, c.y + c.thumbH - 100, 80);
 
+      // 점수
+      const br = { x: c.x + c.w - 170, y: c.y + c.thumbH - 110, w: 150, h: 90 };
+      drawAsset("scoreBadge", br, (r) => {
+        noStroke();
+        fill(C.pink);
+        rect(r.x, r.y, r.w, r.h, r.h / 2);
+      });
+      label(br, it.score, C.white, 54, "Oswald", 0.46);
+    });
     drawingContext.restore();
   }
 
-  // 위쪽 바 (스크롤해도 고정)
+  // 위쪽 (스크롤해도 고정)
   noStroke();
   fill(C.bg);
   if (!img.listBg) rect(0, 0, W, g.top - 30);
   button("backBtn", L.top.back, (r) => iconCircle(r, iconBack));
-  const titleKey = {
-    my: "listTitleMy",
-    best: "listTitleBest",
-    share: "listTitleShare",
-  }[listMode];
-  drawAsset(titleKey, L.top.logo, (r) =>
-    label(r, listMode, C.pink, 110, "Oswald", 0.5),
-  );
+  if (listMode === "user") {
+    label(L.top.logo, listUser.name, C.pink, 80, "sans-serif", 0.5);
+  } else {
+    const key = listMode === "my" ? "listTitleMy" : "listTitleBest";
+    drawAsset(key, L.top.logo, (r) =>
+      label(r, listMode, C.pink, 110, "Oswald", 0.5),
+    );
+  }
 }
 
 function listButtons() {
-  return [{ r: L.top.back, fn: () => goto("main") }];
+  return [
+    {
+      r: L.top.back,
+      fn: () => (listMode === "user" ? openPeople() : goto("main")),
+    },
+  ];
 }
 
 function tapList(p) {
-  const arr = sortedItems();
-  if (arr.length === 0) {
-    if (inRect(p, { x: 290, y: 760, w: 500, h: 450 })) goto("camera");
+  if (!listItems) return;
+  if (listItems.length === 0) {
+    if (listMode === "my" && inRect(p, EMPTY_R)) goto("camera");
     return;
   }
   if (p.y < L.list.top - 20) return;
-  for (let i = 0; i < arr.length; i++) {
+  for (let i = 0; i < listItems.length; i++) {
     const c = cellRect(i);
     if (inRect(p, { x: c.x, y: c.y, w: c.w, h: c.thumbH })) {
-      if (listMode === "share") shareItem(arr[i]);
-      else {
-        detailItem = arr[i];
-        goto("detail");
-      }
+      detailItem = listItems[i];
+      goto("detail");
       return;
     }
+  }
+}
+
+/* =========================================================
+   share : 나랑 친구들 프로필
+   ========================================================= */
+function openPeople() {
+  people = null;
+  scrollY = 0;
+  goto("people");
+  const token = ++loadToken;
+  DB.users()
+    .then((arr) => {
+      if (token !== loadToken) return;
+      // 나를 맨 위로
+      arr.sort(
+        (a, b) =>
+          (b.uid === ME.uid) - (a.uid === ME.uid) || b.updated - a.updated,
+      );
+      if (!arr.some((u) => u.uid === ME.uid))
+        arr.unshift({
+          uid: ME.uid,
+          name: ME.name || "나",
+          count: 0,
+          best: 0,
+          avatar: "",
+        });
+      people = arr;
+      for (const u of arr) {
+        if (u.avatar && !avatars[u.uid + u.updated]) {
+          avatars[u.uid + u.updated] = false;
+          loadImage(u.avatar, (im) => {
+            avatars[u.uid + u.updated] = im;
+          });
+        }
+      }
+    })
+    .catch((err) => {
+      console.warn(err);
+      if (token === loadToken) {
+        people = [];
+        toast("load ✕");
+      }
+    });
+}
+
+function personRect(i) {
+  const p = L.people;
+  return {
+    x: p.x0,
+    y: p.top + i * (p.cardH + p.gap) - scrollY,
+    w: W - p.x0 * 2,
+    h: p.cardH,
+  };
+}
+
+function peopleMaxScroll() {
+  const p = L.people;
+  const n = people ? people.length : 0;
+  return Math.max(0, n * (p.cardH + p.gap) - (H - p.top - 60));
+}
+
+function editRect(r) {
+  return { x: r.x + r.w - 130, y: r.y + r.h / 2 - 50, w: 100, h: 100 };
+}
+
+function drawPeople() {
+  drawAsset("listBg", { x: 0, y: 0, w: W, h: H }, () => {});
+  const P = L.people;
+
+  if (people === null) {
+    loadingDots(W / 2, H / 2);
+  } else {
+    drawingContext.save();
+    drawingContext.beginPath();
+    drawingContext.rect(0, P.top - 20, W, H - P.top + 20);
+    drawingContext.clip();
+
+    people.forEach((u, i) => {
+      const r = personRect(i);
+      if (r.y + r.h < P.top - 40 || r.y > H) return;
+      const isMe = u.uid === ME.uid;
+
+      // 카드
+      push();
+      const pressed =
+        pointer.down &&
+        !pointer.moved &&
+        inRect({ x: pointer.sx, y: pointer.sy }, r);
+      if (pressed) {
+        translate(r.x + r.w / 2, r.y + r.h / 2);
+        scale(0.97);
+        translate(-(r.x + r.w / 2), -(r.y + r.h / 2));
+      }
+      drawAsset("personCard", r, (rr) => {
+        softShadow(30, 0.16);
+        noStroke();
+        fill(isMe ? C.pink : C.white);
+        rect(rr.x, rr.y, rr.w, rr.h, 60);
+        noShadow();
+      });
+
+      // 프로필 사진 (가장 최근에 찍은 사진)
+      const d = r.h - 50;
+      const ax = r.x + 25,
+        ay = r.y + 25;
+      const av = avatars[u.uid + u.updated];
+      noStroke();
+      fill(isMe ? C.white : C.bg);
+      circle(ax + d / 2, ay + d / 2, d + 10);
+      if (av) imageCover(av, ax, ay, d, d, d / 2);
+      else {
+        fill(isMe ? C.bg : C.pink);
+        heartShape(ax + d / 2, ay + d * 0.28, d * 0.5, d * 0.45);
+      }
+      drawAsset(
+        "avatarFrame",
+        { x: ax - 10, y: ay - 10, w: d + 20, h: d + 20 },
+        () => {},
+      );
+
+      // 이름
+      const tx = ax + d + 40;
+      noStroke();
+      fill(isMe ? C.white : C.ink);
+      textFont("sans-serif");
+      textStyle(BOLD);
+      textAlign(LEFT, CENTER);
+      textSize(58);
+      text(u.name || "?", tx, r.y + r.h * 0.36);
+
+      // 모은 개수 · 최고 점수
+      const col = isMe ? C.white : C.pink;
+      fill(col);
+      heartShape(tx + 20, r.y + r.h * 0.6, 40, 36);
+      textFont("Oswald");
+      textStyle(NORMAL);
+      textSize(46);
+      text(u.count || 0, tx + 55, r.y + r.h * 0.68);
+      const bx = tx + 55 + textWidth(String(u.count || 0)) + 50;
+      noFill();
+      stroke(col);
+      strokeWeight(LINE.ui);
+      rect(bx, r.y + r.h * 0.68 - 30, 150, 60, 30);
+      noStroke();
+      fill(col);
+      textAlign(CENTER, CENTER);
+      textSize(36);
+      text("best " + (u.best || 0), bx + 75, r.y + r.h * 0.68 - 2);
+
+      // 내 이름 바꾸기
+      if (isMe) {
+        const er = editRect(r);
+        drawAsset("editBtn", er, (rr) => {
+          noStroke();
+          fill(255, 60);
+          circle(rr.x + rr.w / 2, rr.y + rr.h / 2, rr.w);
+          stroke(C.white);
+          strokeWeight(rr.w * LINE.icon);
+          noFill();
+          iconPencil(rr.x + rr.w / 2, rr.y + rr.h / 2, rr.w * 0.42);
+        });
+      }
+      pop();
+    });
+    drawingContext.restore();
+  }
+
+  noStroke();
+  fill(C.bg);
+  if (!img.listBg) rect(0, 0, W, P.top - 30);
+  button("backBtn", L.top.back, (r) => iconCircle(r, iconBack));
+  drawAsset("peopleTitle", L.top.logo, (r) =>
+    label(r, "share", C.pink, 110, "Oswald", 0.5),
+  );
+}
+
+function peopleButtons() {
+  return [{ r: L.top.back, fn: () => goto("main") }];
+}
+
+function tapPeople(p) {
+  if (!people || p.y < L.people.top - 20) return;
+  for (let i = 0; i < people.length; i++) {
+    const r = personRect(i);
+    if (!inRect(p, r)) continue;
+    const u = people[i];
+    if (u.uid === ME.uid) {
+      if (inRect(p, editRect(r)))
+        askName(() => refreshMyProfile().then(openPeople));
+      else openList("my");
+    } else {
+      openList("user", u);
+    }
+    return;
   }
 }
 
@@ -959,7 +1290,7 @@ function tapList(p) {
 function drawDetail() {
   const it = detailItem;
   if (!it) {
-    goto("list");
+    goto("main");
     return;
   }
   const v = L.camera.view;
@@ -968,11 +1299,13 @@ function drawDetail() {
 
   drawAsset("cameraFrame", { x: 0, y: 0, w: W, h: H }, framePlaceholder);
   button("backBtn", L.top.back, (r) => iconCircle(r, iconBack));
+  if (it.uid !== ME.uid)
+    namePill(it.name, L.top.logo.x + 40, L.top.logo.y + 5, 90);
 
   const b = L.bar;
   drawAsset("bar", b.box, barPlaceholder);
-  button("deleteBtn", b.left, (r) => iconCircle(r, iconTrash, delArmed));
-  button("shareBtn", b.right, (r) => iconCircle(r, iconShare));
+  if (it.uid === ME.uid)
+    button("deleteBtn", b.left, (r) => iconCircle(r, iconTrash, delArmed));
   scoreNumber(
     { x: b.box.x + 200, y: b.box.y, w: b.box.w - 400, h: b.box.h },
     it.score,
@@ -981,79 +1314,277 @@ function drawDetail() {
 }
 
 function detailButtons() {
-  const b = L.bar;
-  const list = [
-    { r: L.top.back, fn: () => goto("list") },
-    {
-      r: b.left,
+  const list = [{ r: L.top.back, fn: () => goto("list") }];
+  if (detailItem && detailItem.uid === ME.uid) {
+    list.push({
+      r: L.bar.left,
       fn: () => {
         if (!delArmed) {
           delArmed = true;
           return;
         }
-        items = items.filter((x) => x.id !== detailItem.id);
-        delete thumbs[detailItem.id];
-        persist();
-        detailItem = null;
-        goto("list");
+        const it = detailItem;
+        uploading = true;
+        DB.deletePhoto(it.id)
+          .then(() => refreshMyProfile())
+          .then(() => {
+            uploading = false;
+            openList(listMode, listUser);
+          })
+          .catch((err) => {
+            console.warn(err);
+            uploading = false;
+            toast("delete ✕");
+          });
       },
-    },
-    { r: b.right, fn: () => shareItem(detailItem) },
-  ];
+    });
+  }
   return list;
 }
 
 /* =========================================================
-   공유 / 저장
+   내 프로필 (닉네임 + 통계)
    ========================================================= */
-function shareItem(item) {
-  if (!item) return;
-  const blob = dataURLtoBlob(item.img);
-  const file = new File([blob], `cute-collect-${item.id}.jpg`, {
-    type: "image/jpeg",
+function refreshMyProfile() {
+  return DB.photosByUser(ME.uid).then((arr) => {
+    const best = arr.reduce((m, x) => Math.max(m, x.score), 0);
+    const latest = arr[0];
+    return (latest ? makeAvatar(latest.img) : Promise.resolve("")).then(
+      (avatar) =>
+        DB.saveUser(ME.uid, {
+          uid: ME.uid,
+          name: ME.name || "나",
+          count: arr.length,
+          best,
+          avatar,
+          updated: Date.now(),
+        }),
+    );
   });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    navigator.share({ files: [file], title: "Cute♡Collect" }).catch(() => {});
-  } else {
-    // 공유가 안 되는 브라우저는 사진 저장
-    const a = document.createElement("a");
-    a.href = item.img;
-    a.download = file.name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
 }
 
-function dataURLtoBlob(data) {
-  const [head, body] = data.split(",");
-  const mime = head.match(/:(.*?);/)[1];
-  const bin = atob(body);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: mime });
+// 프로필용 작은 동그라미 사진 만들기
+function makeAvatar(dataURL) {
+  return new Promise((resolve) => {
+    const im = new Image();
+    im.onload = () => {
+      const S = 200,
+        cv = document.createElement("canvas");
+      cv.width = cv.height = S;
+      const side = Math.min(im.width, im.height);
+      cv.getContext("2d").drawImage(
+        im,
+        (im.width - side) / 2,
+        (im.height - side) / 2,
+        side,
+        side,
+        0,
+        0,
+        S,
+        S,
+      );
+      resolve(cv.toDataURL("image/jpeg", 0.7));
+    };
+    im.onerror = () => resolve("");
+    im.src = dataURL;
+  });
 }
 
-function loadItems() {
-  try {
-    items = JSON.parse(localStorage.getItem(STORE_KEY)) || [];
-  } catch (e) {
-    items = [];
-  }
-  for (const it of items)
-    loadImage(it.img, (im) => {
-      thumbs[it.id] = im;
-    });
+function askName(done) {
+  const wrap = document.createElement("div");
+  Object.assign(wrap.style, {
+    position: "fixed",
+    inset: "0",
+    zIndex: "10",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "16px",
+    background: "rgba(249,211,236,0.94)",
+  });
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 12;
+  input.placeholder = "nickname";
+  input.value = ME.name || "";
+  Object.assign(input.style, {
+    font: "bold 20px sans-serif",
+    textAlign: "center",
+    width: "64vw",
+    padding: "14px 20px",
+    border: "2px solid #E8308A",
+    borderRadius: "999px",
+    outline: "none",
+    color: "#2B1A22",
+    background: "#fff",
+  });
+  const ok = document.createElement("button");
+  ok.textContent = "OK ♡";
+  Object.assign(ok.style, {
+    font: "bold 18px Oswald, sans-serif",
+    padding: "12px 36px",
+    border: "none",
+    borderRadius: "999px",
+    background: "#E8308A",
+    color: "#fff",
+  });
+  const cancel = document.createElement("button");
+  cancel.textContent = "✕";
+  Object.assign(cancel.style, {
+    position: "absolute",
+    top: "20px",
+    right: "20px",
+    width: "44px",
+    height: "44px",
+    border: "none",
+    borderRadius: "50%",
+    background: "#fff",
+    color: "#E8308A",
+    font: "bold 18px sans-serif",
+  });
+  const submit = () => {
+    const v = input.value.trim();
+    if (!v) {
+      input.focus();
+      return;
+    }
+    ME.name = v;
+    try {
+      localStorage.setItem("cc.name", v);
+    } catch (e) {}
+    wrap.remove();
+    done && done();
+  };
+  ok.onclick = submit;
+  cancel.onclick = () => wrap.remove();
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") submit();
+  };
+  wrap.append(input, ok, cancel);
+  document.body.appendChild(wrap);
+  setTimeout(() => input.focus(), 50);
 }
 
-function persist() {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(items));
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
+/* =========================================================
+   데이터 (Firebase Firestore / 설정 전에는 이 폰에만 저장)
+   ========================================================= */
+const DB = {
+  fs: null,
+
+  init() {
+    const cfg = window.FIREBASE_CONFIG;
+    const ok =
+      cfg &&
+      cfg.apiKey &&
+      !/여기/.test(cfg.apiKey) &&
+      typeof firebase !== "undefined";
+    if (ok) {
+      try {
+        firebase.initializeApp(cfg);
+        this.fs = firebase.firestore();
+      } catch (e) {
+        console.warn("Firebase 설정 오류:", e);
+      }
+    }
+    if (!this.fs) console.warn("Firebase 설정 전 — 이 폰에만 저장돼요");
+  },
+
+  get online() {
+    return !!this.fs;
+  },
+
+  addPhoto(doc) {
+    if (this.fs)
+      return this.fs
+        .collection("photos")
+        .add(doc)
+        .then((ref) => ref.id);
+    const arr = this._local("photos");
+    const id = "p" + Date.now();
+    arr.push({ id, ...doc });
+    return this._save("photos", arr).then(() => id);
+  },
+
+  photosByUser(uid) {
+    if (this.fs) {
+      return this.fs
+        .collection("photos")
+        .where("uid", "==", uid)
+        .get()
+        .then((snap) =>
+          snap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => b.t - a.t),
+        );
+    }
+    return Promise.resolve(
+      this._local("photos")
+        .filter((p) => p.uid === uid)
+        .sort((a, b) => b.t - a.t),
+    );
+  },
+
+  bestPhotos(n) {
+    if (this.fs) {
+      return this.fs
+        .collection("photos")
+        .orderBy("score", "desc")
+        .limit(n)
+        .get()
+        .then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    }
+    return Promise.resolve(
+      this._local("photos")
+        .sort((a, b) => b.score - a.score || b.t - a.t)
+        .slice(0, n),
+    );
+  },
+
+  deletePhoto(id) {
+    if (this.fs) return this.fs.collection("photos").doc(id).delete();
+    return this._save(
+      "photos",
+      this._local("photos").filter((p) => p.id !== id),
+    );
+  },
+
+  users() {
+    if (this.fs) {
+      return this.fs
+        .collection("users")
+        .orderBy("updated", "desc")
+        .limit(100)
+        .get()
+        .then((snap) => snap.docs.map((d) => d.data()));
+    }
+    return Promise.resolve(this._local("users"));
+  },
+
+  saveUser(uid, data) {
+    if (this.fs)
+      return this.fs.collection("users").doc(uid).set(data, { merge: true });
+    const arr = this._local("users").filter((u) => u.uid !== uid);
+    arr.push(data);
+    return this._save("users", arr);
+  },
+
+  _local(key) {
+    try {
+      return JSON.parse(localStorage.getItem("cc." + key)) || [];
+    } catch (e) {
+      return [];
+    }
+  },
+  _save(key, arr) {
+    try {
+      localStorage.setItem("cc." + key, JSON.stringify(arr));
+      return Promise.resolve();
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  },
+};
 
 /* =========================================================
    터치 입력
@@ -1069,11 +1600,13 @@ function currentButtons() {
   if (scene === "review") return reviewButtons();
   if (scene === "list") return listButtons();
   if (scene === "detail") return detailButtons();
+  if (scene === "people") return peopleButtons();
   return [];
 }
 
 function onDown(e) {
   e.preventDefault();
+  if (uploading) return;
   try {
     e.target.setPointerCapture(e.pointerId);
   } catch (err) {}
@@ -1085,7 +1618,7 @@ function onDown(e) {
     sx: p.x,
     sy: p.y,
     moved: false,
-    startScroll: listScroll,
+    startScroll: scrollY,
   });
 
   const onBtn = currentButtons().some((b) => inRect(p, b.r));
@@ -1123,12 +1656,9 @@ function onMove(e) {
     const last = curStroke[curStroke.length - 1];
     if (dist(p.x, p.y, last.x, last.y) > 4) curStroke.push(p);
   }
-  if (scene === "list") {
-    listScroll = constrain(
-      pointer.startScroll - (p.y - pointer.sy),
-      0,
-      maxScroll(),
-    );
+  if (scene === "list" || scene === "people") {
+    const max = scene === "list" ? listMaxScroll() : peopleMaxScroll();
+    scrollY = constrain(pointer.startScroll - (p.y - pointer.sy), 0, max);
   }
 }
 
@@ -1160,6 +1690,7 @@ function onUp(e) {
     }
   }
   if (scene === "list") tapList(p);
+  if (scene === "people") tapPeople(p);
   if (
     scene === "camera" &&
     camError &&
@@ -1429,7 +1960,7 @@ function barPlaceholder(r) {
 }
 
 function galleryPlaceholder(r) {
-  const latest = items.length ? thumbs[items[0].id] : null;
+  const latest = myLatest;
   noStroke();
   fill(C.white);
   rect(r.x - 5, r.y - 5, r.w + 10, r.h + 10, 32);
@@ -1485,6 +2016,37 @@ function iconShare(cx, cy, u) {
   line(cx - u * 0.38, cy + u * 0.42, cx + u * 0.38, cy + u * 0.42);
   line(cx + u * 0.38, cy + u * 0.42, cx + u * 0.38, cy - u * 0.1);
   line(cx + u * 0.38, cy - u * 0.1, cx + u * 0.15, cy - u * 0.1);
+}
+
+function iconPencil(cx, cy, u) {
+  line(cx - u * 0.35, cy + u * 0.35, cx + u * 0.3, cy - u * 0.3);
+  line(cx - u * 0.35, cy + u * 0.35, cx - u * 0.38, cy + u * 0.1);
+  line(cx - u * 0.35, cy + u * 0.35, cx - u * 0.1, cy + u * 0.38);
+}
+
+// 누가 찍었는지 이름표
+function namePill(name, x, y, h) {
+  push();
+  textFont("sans-serif");
+  textStyle(BOLD);
+  textSize(h * 0.48);
+  const tw = textWidth(name || "?") + h * 0.8;
+  noStroke();
+  fill(255, 235);
+  rect(x, y, tw, h, h / 2);
+  fill(C.pink);
+  textAlign(CENTER, CENTER);
+  text(name || "?", x + tw / 2, y + h * 0.5);
+  pop();
+}
+
+function loadingDots(cx, cy) {
+  noStroke();
+  for (let i = 0; i < 3; i++) {
+    const a = 0.5 + 0.5 * sin(millis() / 180 - i * 0.9);
+    fill(232, 48, 138, 90 + 165 * a);
+    heartShape(cx + (i - 1) * 90, cy - 30 - a * 14, 60, 54);
+  }
 }
 
 function iconTrash(cx, cy, u) {
